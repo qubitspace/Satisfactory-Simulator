@@ -1,9 +1,10 @@
+// scenes/simulation-scene.ts
 import { Scene } from 'phaser';
 
 interface Factory extends Phaser.GameObjects.Image {
     isSelected?: boolean;
-    dragStartX?: number;
-    dragStartY?: number;
+    dragStartRelativeX?: number;
+    dragStartRelativeY?: number;
 }
 
 export class SimulationScene extends Scene {
@@ -22,7 +23,7 @@ export class SimulationScene extends Scene {
     }
 
     create(): void {
-        // Previous border and grid setup remains the same...
+        // Border and grid setup
         const border = this.add.graphics();
         border.lineStyle(this.borderWidth, 0xff0000, 1);
         border.strokeRect(0, 0, this.worldWidth, this.worldHeight);
@@ -51,7 +52,7 @@ export class SimulationScene extends Scene {
         // Handle canvas right-click drag
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (pointer.rightButtonDown()) {
-                this.input.setPollAlways(); // Ensure we keep getting updates even when mouse leaves window
+                this.dragStartPointer = { x: pointer.x, y: pointer.y };
             } else if (pointer.leftButtonDown()) {
                 // Left click on empty space deselects all
                 const clickedFactory = this.factories.find(factory =>
@@ -64,14 +65,6 @@ export class SimulationScene extends Scene {
             }
         });
 
-        // Setup input handlers
-        this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-            if (pointer.rightButtonDown()) {
-                // Right button for camera pan
-                this.dragStartPointer = { x: pointer.x, y: pointer.y };
-            }
-        });
-
         this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
             // Handle camera panning with right mouse button
             if (pointer.rightButtonDown() && this.dragStartPointer) {
@@ -79,31 +72,11 @@ export class SimulationScene extends Scene {
                 this.cameras.main.scrollY -= (pointer.y - this.dragStartPointer.y) / this.cameras.main.zoom;
                 this.dragStartPointer = { x: pointer.x, y: pointer.y };
             }
-
-            // Handle factory dragging
-            if (this.isDraggingFactory && pointer.leftButtonDown()) {
-                const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-                this.selectedFactories.forEach(factory => {
-                    if (factory.dragStartX !== undefined && factory.dragStartY !== undefined) {
-                        const dx = Math.round((worldPoint.x - factory.dragStartX) / this.gridSize) * this.gridSize;
-                        const dy = Math.round((worldPoint.y - factory.dragStartY) / this.gridSize) * this.gridSize;
-                        factory.x = factory.dragStartX + dx;
-                        factory.y = factory.dragStartY + dy;
-                    }
-                });
-            }
         });
 
         this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
             if (!pointer.rightButtonDown()) {
                 this.dragStartPointer = null;
-            }
-            if (!pointer.leftButtonDown()) {
-                this.isDraggingFactory = false;
-                this.selectedFactories.forEach(factory => {
-                    delete factory.dragStartX;
-                    delete factory.dragStartY;
-                });
             }
         });
 
@@ -111,6 +84,8 @@ export class SimulationScene extends Scene {
             const zoom = this.cameras.main.zoom - (deltaY * 0.001);
             this.cameras.main.setZoom(Phaser.Math.Clamp(zoom, 0.2, 2));
         });
+
+        this.setupInputHandlers();
 
         this.cameras.main.centerOn(this.worldWidth / 2, this.worldHeight / 2);
     }
@@ -133,16 +108,6 @@ export class SimulationScene extends Scene {
                         this.selectFactory(factory);
                     }
                 }
-
-                // Start dragging
-                if (this.selectedFactories.has(factory)) {
-                    this.isDraggingFactory = true;
-                    // Store starting positions for all selected factories
-                    this.selectedFactories.forEach(f => {
-                        f.dragStartX = f.x;
-                        f.dragStartY = f.y;
-                    });
-                }
             }
         });
 
@@ -152,69 +117,72 @@ export class SimulationScene extends Scene {
     }
 
     private setupInputHandlers(): void {
-        // Only set up once
-        if (!this.input.listenerCount('pointermove')) {
-            // Store initial positions of all selected factories when drag starts
-            let dragStartPositions = new Map<Factory, {x: number, y: number}>();
+        let dragStartPointerWorld: { x: number, y: number };
 
-            this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-                if (pointer.rightButtonDown()) {
-                    // Camera panning
-                    this.cameras.main.scrollX -= (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom;
-                    this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom;
-                } else if (this.isDraggingFactory && dragStartPositions.size > 0) {
-                    // Factory dragging
-                    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-                    const snapX = Math.round(worldPoint.x / this.gridSize) * this.gridSize;
-                    const snapY = Math.round(worldPoint.y / this.gridSize) * this.gridSize;
+        this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            if (pointer.leftButtonDown()) {
+                const clickedFactory = this.factories.find(factory =>
+                    factory.getBounds().contains(pointer.worldX, pointer.worldY)
+                );
 
-                    // Get the first selected factory as reference for movement
-                    const [firstFactory] = this.selectedFactories;
-                    const firstStartPos = dragStartPositions.get(firstFactory);
+                if (clickedFactory) {
+                    // If clicking a factory, start dragging if it's selected
+                    if (this.selectedFactories.has(clickedFactory)) {
+                        this.isDraggingFactory = true;
+                        dragStartPointerWorld = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
 
-                    if (firstStartPos) {
-                        // Calculate total movement from start position
-                        const dx = snapX - firstStartPos.x;
-                        const dy = snapY - firstStartPos.y;
-
-                        // Move all selected factories relative to their start positions
+                        // Calculate and store the relative position of each selected factory to the drag start point
                         this.selectedFactories.forEach(factory => {
-                            const startPos = dragStartPositions.get(factory);
-                            if (startPos) {
-                                factory.x = startPos.x + dx;
-                                factory.y = startPos.y + dy;
-                            }
+                            factory.dragStartRelativeX = factory.x - dragStartPointerWorld.x;
+                            factory.dragStartRelativeY = factory.y - dragStartPointerWorld.y;
                         });
                     }
+                } else {
+                    this.deselectAll();
                 }
-            });
+            }
+        });
 
-            this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-                if (pointer.leftButtonDown()) {
-                    const clickedFactory = this.factories.find(factory =>
-                        factory.getBounds().contains(pointer.worldX, pointer.worldY)
-                    );
+        this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+            if (this.isDraggingFactory && dragStartPointerWorld) {
+                // Get current world position
+                const currentWorldPos = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
 
-                    if (clickedFactory) {
-                        // If clicking a factory, store start positions for all selected factories
-                        if (this.selectedFactories.has(clickedFactory)) {
-                            dragStartPositions.clear();
-                            this.selectedFactories.forEach(factory => {
-                                dragStartPositions.set(factory, {x: factory.x, y: factory.y});
-                            });
-                            this.isDraggingFactory = true;
-                        }
-                    } else {
-                        this.deselectAll();
+                // Calculate potential new positions based on relative drag
+                let potentialPositions: { x: number, y: number }[] = [];
+                this.selectedFactories.forEach(factory => {
+                    if (factory.dragStartRelativeX !== undefined && factory.dragStartRelativeY !== undefined) {
+                        const newX = currentWorldPos.x + factory.dragStartRelativeX;
+                        const newY = currentWorldPos.y + factory.dragStartRelativeY;
+                        potentialPositions.push({ x: newX, y: newY });
                     }
-                }
-            });
+                });
 
-            this.input.on('pointerup', () => {
-                this.isDraggingFactory = false;
-                dragStartPositions.clear();
+                // Check if any potential position is out of bounds
+                let isOutOfBounds = potentialPositions.some(pos => {
+                    return pos.x < this.gridSize / 2 || pos.x > this.worldWidth - this.gridSize / 2 ||
+                        pos.y < this.gridSize / 2 || pos.y > this.worldHeight - this.gridSize / 2;
+                });
+
+                // If not out of bounds, move the factories
+                if (!isOutOfBounds) {
+                    potentialPositions.forEach((pos, index) => {
+                        const factory = Array.from(this.selectedFactories)[index];
+                        factory.x = Math.round(pos.x / this.gridSize) * this.gridSize;
+                        factory.y = Math.round(pos.y / this.gridSize) * this.gridSize;
+                    });
+                }
+            }
+        });
+
+        this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+            this.isDraggingFactory = false;
+            dragStartPointerWorld = { x: 0, y: 0 };
+            this.selectedFactories.forEach(factory => {
+                delete factory.dragStartRelativeX;
+                delete factory.dragStartRelativeY;
             });
-        }
+        });
     }
 
     private selectFactory(factory: Factory): void {
