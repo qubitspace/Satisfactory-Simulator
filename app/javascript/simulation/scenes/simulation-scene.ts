@@ -1,5 +1,3 @@
-// scenes/simulation-scene.ts
-import { Scene } from 'phaser';
 
 interface Factory extends Phaser.GameObjects.Image {
     isSelected?: boolean;
@@ -7,19 +5,68 @@ interface Factory extends Phaser.GameObjects.Image {
     dragStartRelativeY?: number;
 }
 
-export class SimulationScene extends Scene {
+
+interface SimulationData {
+    mode: 'sandbox' | 'level';
+    levelId?: number;
+    availableBuildings?: string[]; // Buildings will all be available for sandbox, but levels will have a specific set of unlocked buildings
+    // similarly there will be a set of recipes that are available for levels
+    requiredOutput?: {
+        itemType: string;
+        amount: number;
+    }[];
+}
+
+export class SimulationScene extends Phaser.Scene {
     private gridSize = 64;
     private worldWidth = 12000;
     private worldHeight = 6000;
     private borderWidth = 2;
 
     private isDraggingFactory = false;
-    private factories: Factory[] = [];
+    public factories: Factory[] = [];
     private selectedFactories: Set<Factory> = new Set();
     private dragStartPointer: { x: number; y: number } | null = null;
 
+    public gameMode: 'sandbox' | 'level' = 'sandbox';
+    public levelId?: number;
+    private availableBuildings: string[] = ['factory']; // todo: Should be available machines, as levels will have different machines available (ex: constructor, assembler, etc)
+    // todo: Should have a list of recipes available for each level
+    private requiredOutput?: {
+        itemType: string;
+        amount: number;
+    }[];
+
     constructor() {
         super('simulation-scene');
+    }
+
+    init(data: SimulationData): void {
+        // Reset all properties to their default state
+        this.factories = [];
+        this.selectedFactories.clear();
+        this.dragStartPointer = null;
+        this.isDraggingFactory = false;
+
+        // Set mode-specific properties
+        this.gameMode = data.mode;
+        this.levelId = data.levelId;
+
+        if (data.mode === 'level') {
+            // Apply level-specific constraints
+            this.availableBuildings = data.availableBuildings || ['factory'];
+            this.requiredOutput = data.requiredOutput;
+
+            // Tutorial level might be smaller
+            if (this.levelId === 1) {
+                this.worldWidth = 6000;
+                this.worldHeight = 3000;
+            }
+        } else {
+            // Sandbox mode - everything is available
+            this.availableBuildings = ['factory', 'smelter', 'constructor', 'assembler'];
+            this.requiredOutput = undefined;
+        }
     }
 
     create(): void {
@@ -89,6 +136,47 @@ export class SimulationScene extends Scene {
 
         this.cameras.main.centerOn(this.worldWidth / 2, this.worldHeight / 2);
     }
+
+    private createLevelUI(): void {
+        // Add UI elements specific to level mode
+        const padding = 10;
+        let yPosition = padding;
+
+        // Show available buildings
+        this.add.text(padding, yPosition, 'Available Buildings:', {
+            fontSize: '16px',
+            color: '#ffffff'
+        });
+        yPosition += 25;
+
+        this.availableBuildings.forEach(building => {
+            this.add.text(padding + 10, yPosition, `- ${building}`, {
+                fontSize: '14px',
+                color: '#cccccc'
+            });
+            yPosition += 20;
+        });
+
+        // Show required output if exists
+        if (this.requiredOutput) {
+            yPosition += 30;
+            this.add.text(padding, yPosition, 'Required Output:', {
+                fontSize: '16px',
+                color: '#ffffff'
+            });
+            yPosition += 25;
+
+            this.requiredOutput.forEach(requirement => {
+                this.add.text(padding + 10, yPosition,
+                    `- ${requirement.amount}/min ${requirement.itemType}`, {
+                        fontSize: '14px',
+                        color: '#cccccc'
+                    });
+                yPosition += 20;
+            });
+        }
+    }
+
     public createFactory(worldX: number, worldY: number): void {
         const factory = this.add.image(worldX, worldY, 'factory-icon')
             .setInteractive() as Factory;
@@ -114,6 +202,12 @@ export class SimulationScene extends Scene {
         // Add to our collection
         this.factories.push(factory);
         this.updateFactoryVisuals(factory);
+    }
+
+    public clearFactories(): void {
+        this.factories.forEach(factory => factory.destroy());
+        this.factories = [];
+        this.selectedFactories.clear();
     }
 
     private setupInputHandlers(): void {
