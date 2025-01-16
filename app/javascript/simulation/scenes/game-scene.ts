@@ -1,7 +1,6 @@
 import GameData, { Machine, Recipe, Item } from '../types';
 import { SimulationScene } from './simulation-scene';
-import { SaveManager } from '../save-manager';
-import { SaveState } from '../save-state';
+import {saveGame, loadGame, deleteSave, getSaves, SaveState} from '../save-system';
 
 interface GameSceneData {
     mode: 'sandbox' | 'level';
@@ -46,7 +45,6 @@ export class GameScene extends Phaser.Scene {
     create(): void {
         const simulationHeight = window.innerHeight - this.TOOLBAR_HEIGHT;
 
-        // Launch the simulation scene
         this.scene.launch('simulation-scene', {
             mode: this.mode,
             levelId: this.levelId
@@ -63,16 +61,6 @@ export class GameScene extends Phaser.Scene {
 
         // Create main UI elements
         this.createUI();
-
-        // Set up auto-save for sandbox mode
-        if (this.mode === 'sandbox') {
-            this.time.addEvent({
-                delay: 30000, // Check every 30 seconds
-                callback: this.checkAutoSave,
-                callbackScope: this,
-                loop: true
-            });
-        }
 
         // Create save indicator
         this.saveIndicator = this.add.text(window.innerWidth - 150, 10, '', {
@@ -201,7 +189,7 @@ export class GameScene extends Phaser.Scene {
         if (this.mode !== 'sandbox' || !this.saveName) return;
 
         const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
-        SaveManager.saveGame(simulationScene, this.saveName);
+        saveGame(simulationScene, this.saveName);
         this.lastAutoSave = Date.now();
         this.showSaveIndicator('Game Saved');
     }
@@ -226,14 +214,6 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
-    private checkAutoSave = (): void => {
-        if (this.mode === 'sandbox' &&
-            this.saveName &&
-            Date.now() - this.lastAutoSave >= this.autoSaveInterval) {
-            this.saveGame();
-            this.showSaveIndicator('Auto-Saved');
-        }
-    }
 
     private showSaveIndicator(message: string): void {
         if (!this.saveIndicator) return;
