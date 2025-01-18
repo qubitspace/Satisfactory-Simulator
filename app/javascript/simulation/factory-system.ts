@@ -1,8 +1,10 @@
-// /app/javascript/simulation/systems/factory-system.ts
+// /app/javascript/simulation/factory-system.ts
 
 import Phaser from 'phaser';
+import GameData from './types';
+import {Transport} from "./transport-system";
 
-export interface Factory extends Phaser.GameObjects.Image {
+export interface Factory extends Phaser.GameObjects.Container {
     id: string;
     type: string;
     recipe?: string;
@@ -10,6 +12,11 @@ export interface Factory extends Phaser.GameObjects.Image {
     isSelected?: boolean;
     dragStartRelativeX?: number;
     dragStartRelativeY?: number;
+    baseSprite: Phaser.GameObjects.Rectangle;
+    inputMarkers: Phaser.GameObjects.Rectangle[];
+    outputMarkers: Phaser.GameObjects.Rectangle[];
+    inputConnections: Map<number, Transport>;
+    outputConnections: Map<number, Transport>;
 }
 
 export class FactorySystem {
@@ -19,13 +26,14 @@ export class FactorySystem {
     private gridSize = 64;
     private worldWidth: number;
     private worldHeight: number;
-
+    private gameData: GameData;
     private scene: Phaser.Scene;
 
     constructor(scene: Phaser.Scene) {
         this.scene = scene;
         this.worldWidth = (scene as any).worldWidth || 12000;
         this.worldHeight = (scene as any).worldHeight || 6000;
+        this.gameData = GameData.getInstance();
         this.setupInputHandlers();
     }
 
@@ -108,16 +116,131 @@ export class FactorySystem {
         });
     }
 
-    public createFactory(worldX: number, worldY: number, type: string = 'factory'): Factory {
+    public createFactory(worldX: number, worldY: number, type: string = 'constructor'): Factory {
+        const machine = this.gameData.getMachine(type);
+        if (!machine) {
+            console.error(`Machine type ${type} not found`);
+            // Create a default factory instead of returning undefined
+            return this.createDefaultFactory(worldX, worldY);
+        }
+
+        // Calculate factory size based on inputs/outputs
+        const maxPorts = Math.max(machine.inputCount, machine.outputCount);
+        const factoryHeight = (maxPorts + 1) * this.gridSize; // +1 for padding
+        const factoryWidth = 3 * this.gridSize; // 2 grid squares wide
+
+        // Snap to grid, centering on the click point
         const snappedX = Math.round(worldX / this.gridSize) * this.gridSize;
         const snappedY = Math.round(worldY / this.gridSize) * this.gridSize;
 
-        const factory = this.scene.add.image(snappedX, snappedY, 'factory-icon')
-            .setInteractive() as Factory;
+        // Create a container for the factory
+        const container = this.scene.add.container(snappedX, snappedY) as Factory;
 
-        factory.id = Date.now().toString();
-        factory.type = type;
+        // Create base sprite - a larger rectangle
+        const baseSprite = this.scene.add.rectangle(0, 0, factoryWidth, factoryHeight, 0x666666);
+        baseSprite.setStrokeStyle(2, 0x999999);
+        container.add(baseSprite);
+        container.baseSprite = baseSprite;
 
+        // Add machine type label
+        const label = this.scene.add.text(0, 0, type, {
+            fontSize: '14px',
+            color: '#ffffff',
+            align: 'center'
+        }).setOrigin(0.5, 0.5);
+        container.add(label);
+
+        container.inputMarkers = [];
+        container.outputMarkers = [];
+
+        // Add input markers - one per grid square on left side
+        for (let i = 0; i < machine.inputCount; i++) {
+            const marker = this.scene.add.rectangle(
+                -factoryWidth/2,  // Left side
+                -factoryHeight/2 + (i + 1) * this.gridSize,  // Spaced by grid size
+                this.gridSize/4,  // Marker size
+                this.gridSize/4,
+                0x3333ff
+            );
+            container.add(marker);
+            container.inputMarkers.push(marker);
+
+            // Add input label
+            const inputLabel = this.scene.add.text(
+                -factoryWidth/2 + this.gridSize/3,
+                -factoryHeight/2 + (i + 1) * this.gridSize,
+                `In ${i + 1}`,
+                { fontSize: '12px', color: '#ffffff' }
+            ).setOrigin(0, 0.5);
+            container.add(inputLabel);
+        }
+
+        // Add output markers - one per grid square on right side
+        for (let i = 0; i < machine.outputCount; i++) {
+            const marker = this.scene.add.rectangle(
+                factoryWidth/2,  // Right side
+                -factoryHeight/2 + (i + 1) * this.gridSize,  // Spaced by grid size
+                this.gridSize/4,
+                this.gridSize/4,
+                0xff3333
+            );
+            container.add(marker);
+            container.outputMarkers.push(marker);
+
+            // Add output label
+            const outputLabel = this.scene.add.text(
+                factoryWidth/2 - this.gridSize/3,
+                -factoryHeight/2 + (i + 1) * this.gridSize,
+                `Out ${i + 1}`,
+                { fontSize: '12px', color: '#ffffff' }
+            ).setOrigin(1, 0.5);
+            container.add(outputLabel);
+        }
+
+        // Set container properties
+        container.setSize(factoryWidth, factoryHeight);
+        container.setInteractive(new Phaser.Geom.Rectangle(-factoryWidth/2, -factoryHeight/2, factoryWidth, factoryHeight),
+            Phaser.Geom.Rectangle.Contains);
+
+        container.id = Date.now().toString();
+        container.type = type;
+
+        // Add to factories array
+        this.factories.push(container);
+        this.updateFactoryVisuals(container);
+
+        // Setup factory events
+        this.setupFactoryEvents(container);
+
+        return container;
+    }
+
+    private createDefaultFactory(worldX: number, worldY: number): Factory {
+        const snappedX = Math.round(worldX / this.gridSize) * this.gridSize;
+        const snappedY = Math.round(worldY / this.gridSize) * this.gridSize;
+
+        const container = this.scene.add.container(snappedX, snappedY) as Factory;
+
+        // Create a simple square factory
+        const baseSprite = this.scene.add.rectangle(0, 0, this.gridSize, this.gridSize, 0x666666);
+        baseSprite.setStrokeStyle(2, 0x999999);
+        container.add(baseSprite);
+        container.baseSprite = baseSprite;
+
+        container.inputMarkers = [];
+        container.outputMarkers = [];
+        container.id = Date.now().toString();
+        container.type = 'unknown';
+
+        container.setSize(this.gridSize, this.gridSize);
+        container.setInteractive(new Phaser.Geom.Rectangle(-this.gridSize/2, -this.gridSize/2, this.gridSize, this.gridSize),
+            Phaser.Geom.Rectangle.Contains);
+
+        this.factories.push(container);
+        return container;
+    }
+
+    private setupFactoryEvents(factory: Factory): void {
         factory.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (pointer.leftButtonDown()) {
                 if (pointer.event.ctrlKey || pointer.event.metaKey) {
@@ -130,46 +253,13 @@ export class FactorySystem {
                 }
             }
         });
-
-        this.factories.push(factory);
-        this.updateFactoryVisuals(factory);
-
-        return factory;
     }
 
     private getFactoryAt(worldX: number, worldY: number): Factory | undefined {
-        return this.factories.find(factory =>
-            factory.getBounds().contains(worldX, worldY)
-        );
-    }
-
-    private updateDragPositions(currentWorldPos: { x: number, y: number }): void {
-        let potentialPositions: { x: number, y: number }[] = [];
-
-        this.selectedFactories.forEach(factory => {
-            if (factory.dragStartRelativeX !== undefined &&
-                factory.dragStartRelativeY !== undefined) {
-                const newX = currentWorldPos.x + factory.dragStartRelativeX;
-                const newY = currentWorldPos.y + factory.dragStartRelativeY;
-                potentialPositions.push({ x: newX, y: newY });
-            }
+        return this.factories.find(factory => {
+            const bounds = factory.getBounds();
+            return bounds.contains(worldX, worldY);
         });
-
-        // Check if any position is out of bounds
-        const isOutOfBounds = potentialPositions.some(pos => {
-            return pos.x < this.gridSize / 2 ||
-                pos.x > this.scene.scale.width - this.gridSize / 2 ||
-                pos.y < this.gridSize / 2 ||
-                pos.y > this.scene.scale.height - this.gridSize / 2;
-        });
-
-        if (!isOutOfBounds) {
-            potentialPositions.forEach((pos, index) => {
-                const factory = Array.from(this.selectedFactories)[index];
-                factory.x = Math.round(pos.x / this.gridSize) * this.gridSize;
-                factory.y = Math.round(pos.y / this.gridSize) * this.gridSize;
-            });
-        }
     }
 
     private selectFactory(factory: Factory): void {
@@ -200,9 +290,9 @@ export class FactorySystem {
 
     private updateFactoryVisuals(factory: Factory): void {
         if (factory.isSelected) {
-            factory.setTint(0x00ff00);
+            factory.baseSprite.setStrokeStyle(2, 0x00ff00);
         } else {
-            factory.clearTint();
+            factory.baseSprite.setStrokeStyle(2, 0x999999);
         }
     }
 
@@ -224,11 +314,3 @@ export class FactorySystem {
         this.clearFactories();
     }
 }
-
-// TODO: Allow factories to have different machine types and recipies.
-// Draw factories with the number of inputs/outputs based on the machine.
-// Indicate the input/output item and rate
-// Add a way to change the machine type and recipe
-// Allow connecting belts to factories to transport items
-// Belts should lock to a factory, and you have to do something specific to disconnect it.
-// Dragging factories should also drag connected belts

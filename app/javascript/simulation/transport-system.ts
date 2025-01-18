@@ -6,6 +6,12 @@ export interface TransportPoint {
     x: number;
     y: number;
     isHandle?: boolean;
+    connection?: {
+        nodeId: string;  // ID of factory or logistic node
+        nodeType: 'factory' | 'splitter' | 'merger';
+        portIndex: number;  // Index of the input/output port
+        direction: 'north' | 'south' | 'east' | 'west';
+    };
 }
 
 export interface Transport {
@@ -13,8 +19,6 @@ export interface Transport {
     points: TransportPoint[];
     graphics: Phaser.GameObjects.Graphics;
     type: 'belt' | 'pipe';
-    fromFactory?: string;
-    toFactory?: string;
 }
 
 export class TransportSystem {
@@ -91,6 +95,57 @@ export class TransportSystem {
                 this.finishDragging();
             }
         });
+    }
+
+    private calculatePath(points: TransportPoint[]): TransportPoint[] {
+        if (points.length < 2) return points;
+
+        const path: TransportPoint[] = [];
+        let lastDirection: string | null = null;
+
+        for (let i = 0; i < points.length - 1; i++) {
+            const current = points[i];
+            const next = points[i + 1];
+
+            path.push(current);
+
+            // Determine preferred direction
+            let dx = next.x - current.x;
+            let dy = next.y - current.y;
+
+            // Get connection direction if it exists
+            const connectionDir = current.connection?.direction;
+
+            // Decide primary direction
+            let goHorizontalFirst = true;
+
+            if (connectionDir) {
+                // Use connection direction
+                goHorizontalFirst = ['east', 'west'].includes(connectionDir);
+            } else if (lastDirection) {
+                // Try to maintain last direction if possible
+                goHorizontalFirst = lastDirection === 'horizontal' && dx !== 0;
+            } else {
+                // Choose shortest path
+                goHorizontalFirst = Math.abs(dx) > Math.abs(dy);
+            }
+
+            // Add corner point
+            if (dx !== 0 && dy !== 0) {
+                if (goHorizontalFirst) {
+                    path.push({ x: next.x, y: current.y });
+                    lastDirection = 'vertical';
+                } else {
+                    path.push({ x: current.x, y: next.y });
+                    lastDirection = 'horizontal';
+                }
+            } else {
+                lastDirection = dx !== 0 ? 'horizontal' : 'vertical';
+            }
+        }
+
+        path.push(points[points.length - 1]);
+        return path;
     }
 
     private handlePointDeletion({ transport, point, index }: { transport: Transport, point: TransportPoint, index: number }): void {
@@ -229,29 +284,51 @@ export class TransportSystem {
     }
 
     private updateTransportVisuals(transport: Transport): void {
-        transport.graphics.clear();
+        const pathPoints = this.calculatePath(transport.points);
+        const graphics = transport.graphics;
 
-        // Draw main line
-        transport.graphics.lineStyle(8, transport.type === 'belt' ? 0x666666 : 0x3333aa);
-        this.drawPath(transport.graphics, transport.points);
+        graphics.clear();
+
+        // Draw main belt line
+        graphics.lineStyle(8, 0x666666);  // Base color
+        this.drawBeltPath(graphics, pathPoints);
 
         // Draw highlight line
-        transport.graphics.lineStyle(6, transport.type === 'belt' ? 0x888888 : 0x4444cc);
-        this.drawPath(transport.graphics, transport.points);
+        graphics.lineStyle(6, 0x888888);  // Lighter color for dimension
+        this.drawBeltPath(graphics, pathPoints);
 
-        // Draw direction arrows
-        this.drawArrows(transport.graphics, transport.points);
+        // Draw direction arrows only on straight segments
+        graphics.lineStyle(2, 0xffff00);
+        for (let i = 0; i < pathPoints.length - 1; i++) {
+            const current = pathPoints[i];
+            const next = pathPoints[i + 1];
 
-        // Draw handles for all points
+            if (current.x === next.x || current.y === next.y) {
+                const midX = (current.x + next.x) / 2;
+                const midY = (current.y + next.y) / 2;
+                const angle = Math.atan2(next.y - current.y, next.x - current.x);
+                this.drawArrow(graphics, midX, midY, angle);
+            }
+        }
+
+        // Draw connection points
         transport.points.forEach(point => {
-            transport.graphics.lineStyle(2, 0xffff00);
-            transport.graphics.strokeRect(
-                point.x - this.handleSize/2,
-                point.y - this.handleSize/2,
-                this.handleSize,
-                this.handleSize
-            );
+            if (point.connection) {
+                graphics.lineStyle(2, 0x00ff00);
+                graphics.strokeCircle(point.x, point.y, 8);
+            }
         });
+    }
+
+    private drawBeltPath(graphics: Phaser.GameObjects.Graphics, points: TransportPoint[]): void {
+        graphics.beginPath();
+        graphics.moveTo(points[0].x, points[0].y);
+
+        for (let i = 1; i < points.length; i++) {
+            graphics.lineTo(points[i].x, points[i].y);
+        }
+
+        graphics.strokePath();
     }
 
     private findEndpointConnection(x: number, y: number): { transport: Transport, point: TransportPoint } | null {
@@ -308,25 +385,6 @@ export class TransportSystem {
         }
     }
 
-    private drawPath(graphics: Phaser.GameObjects.Graphics, points: TransportPoint[]): void {
-        if (points.length < 2) return;
-
-        graphics.beginPath();
-        graphics.moveTo(points[0].x, points[0].y);
-
-        for (let i = 1; i < points.length; i++) {
-            // Draw L-shaped path between points
-            const prev = points[i - 1];
-            const curr = points[i];
-
-            // First go horizontal, then vertical
-            graphics.lineTo(curr.x, prev.y);
-            graphics.lineTo(curr.x, curr.y);
-        }
-
-        graphics.strokePath();
-    }
-
 
     private drawArrows(graphics: Phaser.GameObjects.Graphics, points: TransportPoint[]): void {
         for (let i = 0; i < points.length - 1; i++) {
@@ -350,18 +408,37 @@ export class TransportSystem {
     }
 
     private drawArrow(graphics: Phaser.GameObjects.Graphics, x: number, y: number, angle: number): void {
-        graphics.save();
-        graphics.translateCanvas(x, y);
-        graphics.rotateCanvas(angle);
+        const arrowLength = 12;
+        const arrowWidth = 6;
 
         graphics.lineStyle(2, 0xffff00);
+
+        // Calculate arrow points
+        const tipX = x + Math.cos(angle) * (arrowLength/2);
+        const tipY = y + Math.sin(angle) * (arrowLength/2);
+        const backX = x - Math.cos(angle) * (arrowLength/2);
+        const backY = y - Math.sin(angle) * (arrowLength/2);
+
+        // Draw arrow base line
         graphics.beginPath();
-        graphics.moveTo(-10, -10);
-        graphics.lineTo(0, 0);
-        graphics.lineTo(-10, 10);
+        graphics.moveTo(backX, backY);
+        graphics.lineTo(tipX, tipY);
         graphics.strokePath();
 
-        graphics.restore();
+        // Draw arrow head
+        const headAngle = Math.PI / 4;  // 45 degrees
+        graphics.beginPath();
+        graphics.moveTo(tipX, tipY);
+        graphics.lineTo(
+            tipX - Math.cos(angle - headAngle) * arrowWidth,
+            tipY - Math.sin(angle - headAngle) * arrowWidth
+        );
+        graphics.moveTo(tipX, tipY);
+        graphics.lineTo(
+            tipX - Math.cos(angle + headAngle) * arrowWidth,
+            tipY - Math.sin(angle + headAngle) * arrowWidth
+        );
+        graphics.strokePath();
     }
 
     public destroy(): void {

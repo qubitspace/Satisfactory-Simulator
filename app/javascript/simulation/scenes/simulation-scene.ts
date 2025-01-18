@@ -1,5 +1,5 @@
 import {TransportSystem} from "../transport-system";
-import {FactorySystem} from "../factory-system";
+import {Factory, FactorySystem} from "../factory-system";
 
 interface SimulationData {
     mode: 'sandbox' | 'level';
@@ -71,6 +71,10 @@ export class SimulationScene extends Phaser.Scene {
         if (this.gameMode === 'level') {
             this.createLevelUI();
         }
+    }
+
+    public getFactories(): Factory[] {
+        return this.factorySystem.getFactories();
     }
 
     private setupWorldGrid(): void {
@@ -172,8 +176,8 @@ export class SimulationScene extends Phaser.Scene {
         }
     }
 
-    public createFactory(worldX: number, worldY: number): void {
-        this.factorySystem.createFactory(worldX, worldY);
+    public createFactory(worldX: number, worldY: number, machineType: string = 'constructor'): void {
+        this.factorySystem.createFactory(worldX, worldY, machineType);
     }
 
     public clearFactories(): void {

@@ -75,7 +75,7 @@ export function getSaves(): SaveMetadata[] {
 }
 
 export function saveGame(scene: SimulationScene, name: string): void {
-    const factories: FactoryState[] = scene.factories.map(factory => ({
+    const factories: FactoryState[] = scene.getFactories().map(factory => ({
         x: factory.x,
         y: factory.y,
         type: factory.type || 'factory'

@@ -11,13 +11,11 @@ interface GameSceneData {
 
 
 export class GameScene extends Phaser.Scene {
+    private readonly TOOLBAR_HEIGHT = 100;
     private gameData: GameData = GameData.getInstance();
     private mode: 'sandbox' | 'level' = 'sandbox';
     private levelId?: number;
     private saveName?: string;
-    private readonly TOOLBAR_HEIGHT = 100;
-    private autoSaveInterval: number = 5 * 60 * 1000; // 5 minutes
-    private lastAutoSave: number = Date.now();
     private saveIndicator?: Phaser.GameObjects.Text;
 
     constructor() {
@@ -42,9 +40,16 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    shutdown(): void {
+        this.scene.stop('simulation-scene');
+        this.scene.stop('toolbar-scene');
+        window.removeEventListener('resize', () => this.handleResize());
+    }
+
     create(): void {
         const simulationHeight = window.innerHeight - this.TOOLBAR_HEIGHT;
 
+        // Simulation Scene
         this.scene.launch('simulation-scene', {
             mode: this.mode,
             levelId: this.levelId
@@ -53,34 +58,21 @@ export class GameScene extends Phaser.Scene {
         const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
         simulationScene.cameras.main.setViewport(0, 0, window.innerWidth, simulationHeight);
 
-        // Launch the toolbar
+        // Toolbar Scene
         this.scene.launch('toolbar-scene', {
             toolbarHeight: this.TOOLBAR_HEIGHT,
             yPosition: simulationHeight
         });
 
-        // Create main UI elements
+        // Initialize UI and event listeners
         this.createUI();
-
-        // Create save indicator
-        this.saveIndicator = this.add.text(window.innerWidth - 150, 10, '', {
-            fontSize: '16px',
-            color: '#ffffff',
-            backgroundColor: '#444444',
-            padding: { x: 8, y: 4 }
-        });
-        this.saveIndicator.setDepth(100);
-        this.saveIndicator.setScrollFactor(0);
-        this.saveIndicator.setVisible(false);
-
         window.addEventListener('resize', () => this.handleResize());
 
-        // Emit create complete event for save loading
         this.events.emit('create-complete');
     }
 
     private createUI(): void {
-        // Back button
+
         const backButton = this.add.text(100, 50, 'Back', {
             fontSize: '24px',
             color: '#ffffff',
@@ -97,7 +89,6 @@ export class GameScene extends Phaser.Scene {
                 }
             });
 
-        // Add save button for sandbox mode
         if (this.mode === 'sandbox') {
             const saveButton = this.add.text(250, 50, 'Save', {
                 fontSize: '24px',
@@ -109,7 +100,6 @@ export class GameScene extends Phaser.Scene {
                 .on('pointerdown', () => this.saveGame());
         }
 
-        // Add level-specific UI
         if (this.mode === 'level') {
             const objectivesButton = this.add.text(window.innerWidth - 150, 50, 'Objectives', {
                 fontSize: '24px',
@@ -190,14 +180,12 @@ export class GameScene extends Phaser.Scene {
 
         const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
         saveGame(simulationScene, this.saveName);
-        this.lastAutoSave = Date.now();
         this.showSaveIndicator('Game Saved');
     }
 
     private loadSaveState(saveState: SaveState): void {
         const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
 
-        // Clear existing factories first
         simulationScene.clearFactories();
 
         // Need to wait for next frame to ensure simulation scene is ready
@@ -207,7 +195,6 @@ export class GameScene extends Phaser.Scene {
                 const worldX = factory.x;
                 const worldY = factory.y;
                 simulationScene.createFactory(worldX, worldY);
-                // TODO: Restore factory configuration when implemented
             });
 
             this.showSaveIndicator('Game Loaded');
@@ -262,11 +249,5 @@ export class GameScene extends Phaser.Scene {
     private checkLevelCompletion(): void {
         console.log('Checking level completion for level:', this.levelId);
         // TODO: Implement level completion checking
-    }
-
-    shutdown(): void {
-        this.scene.stop('simulation-scene');
-        this.scene.stop('toolbar-scene');
-        window.removeEventListener('resize', () => this.handleResize());
     }
 }
