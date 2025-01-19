@@ -9,6 +9,11 @@ import { ToolbarScene } from './scenes/toolbar-scene';
 
 const TOOLBAR_HEIGHT = 100;
 
+function getUrlParam(name: string): string | null {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(name);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const gameContainer = document.getElementById('game-container');
     if (gameContainer) {

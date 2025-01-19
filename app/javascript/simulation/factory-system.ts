@@ -176,6 +176,16 @@ export class FactorySystem {
                 this.halfGridSize / 2,
                 0x3333ff
             );
+
+            marker.setInteractive({ useHandCursor: true });
+            marker.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+                if (pointer.leftButtonDown()) {
+                    this.scene.events.emit('start-belt-drag', {
+                          factory: container, marker, portIndex: i, portType: 'input'
+                    });
+                }
+            });
+
             container.add(marker);
             container.inputMarkers.push(marker);
 
@@ -210,6 +220,16 @@ export class FactorySystem {
                 this.halfGridSize / 2,
                 0xff3333
             );
+
+            marker.setInteractive({ useHandCursor: true });
+            marker.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+                if (pointer.leftButtonDown()) {
+                    this.scene.events.emit('start-belt-drag', {
+                        factory: container, marker, portIndex: i, portType: 'output'
+                    });
+                }
+            });
+
             container.add(marker);
             container.outputMarkers.push(marker);
 

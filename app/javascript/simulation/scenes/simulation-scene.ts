@@ -73,6 +73,7 @@ export class SimulationScene extends Phaser.Scene {
         if (this.gameMode === 'level') {
             this.createLevelUI();
         }
+        this.events.emit('create-complete');
     }
 
     public getFactories(): Factory[] {

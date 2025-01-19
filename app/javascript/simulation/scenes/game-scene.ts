@@ -18,6 +18,8 @@ export class GameScene extends Phaser.Scene {
     private saveName?: string;
     private saveIndicator?: Phaser.GameObjects.Text;
 
+    private loadedFromURLParam = false;
+
     constructor() {
         super({ key: 'game-scene' });
     }
@@ -41,12 +43,52 @@ export class GameScene extends Phaser.Scene {
     }
 
     shutdown(): void {
+        window.removeEventListener('beforeunload', this.handleBeforeUnload);
+        if (this.mode === 'sandbox' && this.saveName) {
+              const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
+              try {
+                    saveGame(simulationScene, this.saveName);
+                    localStorage.setItem('lastActiveSave', this.saveName);
+                  } catch (error) {
+                  console.error('Auto-save failed:', error);
+              }
+        }
         this.scene.stop('simulation-scene');
         this.scene.stop('toolbar-scene');
         window.removeEventListener('resize', () => this.handleResize());
     }
 
     create(): void {
+
+        // 1) Check ?saveName= in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        let paramSaveName = urlParams.get('saveName');
+
+        // 2) If no ?saveName, fallback to localStorage's "lastActiveSave"
+        if (!paramSaveName) {
+            const lastSaved = localStorage.getItem('lastActiveSave');
+            if (lastSaved) {
+                paramSaveName = lastSaved;
+            }
+        }
+
+        // 3) If we found a saveName, we do an immediate load if it exists;
+        if (this.mode === 'sandbox' && paramSaveName && !this.saveName) {
+            // We only do this if the game wasn’t specifically launched with a “saveName” in init()
+            this.loadedFromURLParam = true;
+            const loadedState = loadGame(paramSaveName);
+            if (loadedState) {
+                this.saveName = paramSaveName;
+                this.events.once('create-complete', () => {
+                    this.loadSaveState(loadedState);
+                });
+            } else {
+                // If not found, just create a new empty sim with that name
+                this.saveName = paramSaveName;
+            }
+        }
+        // If none of the above apply, we either have this.saveName from init() or we do a new game
+
         const simulationHeight = window.innerHeight - this.TOOLBAR_HEIGHT;
 
         // Simulation Scene
@@ -66,8 +108,9 @@ export class GameScene extends Phaser.Scene {
         // Initialize UI and event listeners
         this.createUI();
         window.addEventListener('resize', () => this.handleResize());
+        window.addEventListener('beforeunload', this.handleBeforeUnload);
 
-        this.events.emit('create-complete');
+        this.events.emit("scene-ready");
     }
 
     private createUI(): void {
@@ -179,7 +222,8 @@ export class GameScene extends Phaser.Scene {
 
         // Generate a default save name if none exists
         if (!this.saveName) {
-            this.saveName = `Save_${new Date().toISOString().slice(0,19).replace(/[^0-9]/g, '_')}`;
+            const d = new Date();
+            this.saveName = `Auto_${d.getFullYear()}_${(d.getMonth()+1)}_${d.getDate()}_${d.getHours()}${d.getMinutes()}`;
         }
 
         try {
@@ -187,6 +231,7 @@ export class GameScene extends Phaser.Scene {
             saveGame(simulationScene, this.saveName);
             console.log(`Game saved as: ${this.saveName}`);
             this.showSaveIndicator('Game Saved');
+            localStorage.setItem('lastActiveSave', this.saveName);
         } catch (error) {
             console.error('Failed to save game:', error);
             this.showSaveIndicator('Save Failed!');
@@ -194,6 +239,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     private loadSaveState(saveState: SaveState): void {
+        console.log("loadSavedState");
         const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
 
         simulationScene.clearFactories();
@@ -259,5 +305,17 @@ export class GameScene extends Phaser.Scene {
     private checkLevelCompletion(): void {
         console.log('Checking level completion for level:', this.levelId);
         // TODO: Implement level completion checking
+    }
+
+    private handleBeforeUnload = (event: BeforeUnloadEvent) => {
+        if (this.mode === 'sandbox' && this.saveName) {
+            const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
+            try {
+                saveGame(simulationScene, this.saveName);
+                localStorage.setItem('lastActiveSave', this.saveName);
+            } catch (error) {
+                  console.error('Auto-save on unload failed:', error);
+            }
+        }
     }
 }
