@@ -57,6 +57,8 @@ export class SimulationScene extends Phaser.Scene {
         // Initialize systems
         this.transportSystem = new TransportSystem(this);
         this.factorySystem = new FactorySystem(this);
+        const toolbarHeight = 100;
+        this.cameras.main.setViewport(0, 0, window.innerWidth, window.innerHeight - toolbarHeight);
 
         // Border and grid setup
         this.setupWorldGrid();
@@ -176,7 +178,7 @@ export class SimulationScene extends Phaser.Scene {
         }
     }
 
-    public createFactory(worldX: number, worldY: number, machineType: string = 'constructor'): void {
+    public createFactory(worldX: number, worldY: number, machineType: string = 'constructor', recipe: string = 'Iron Plate'): void {
         this.factorySystem.createFactory(worldX, worldY, machineType);
     }
 

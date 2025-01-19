@@ -56,7 +56,6 @@ export class GameScene extends Phaser.Scene {
         });
 
         const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
-        simulationScene.cameras.main.setViewport(0, 0, window.innerWidth, simulationHeight);
 
         // Toolbar Scene
         this.scene.launch('toolbar-scene', {
@@ -202,10 +201,10 @@ export class GameScene extends Phaser.Scene {
         // Need to wait for next frame to ensure simulation scene is ready
         this.time.delayedCall(0, () => {
             // Recreate factories from save state
-            saveState.factories.forEach((factory: { x: any; y: any; }) => {
-                const worldX = factory.x;
-                const worldY = factory.y;
-                simulationScene.createFactory(worldX, worldY);
+            saveState.factories.forEach((f) => {
+                const worldX = f.x;
+                const worldY = f.y;
+                simulationScene.createFactory(f.x, f.y, f.type, f.recipe);
             });
 
             this.showSaveIndicator('Game Loaded');

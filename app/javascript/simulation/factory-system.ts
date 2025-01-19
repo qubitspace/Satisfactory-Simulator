@@ -118,7 +118,7 @@ export class FactorySystem {
         });
     }
 
-    public createFactory(worldX: number, worldY: number, type: string = 'constructor'): Factory {
+    public createFactory(worldX: number, worldY: number, type: string = 'Constructor', recipe?: string): Factory {
         const machine = this.gameData.getMachine(type);
         if (!machine) {
             console.error(`Machine type ${type} not found`);
@@ -154,7 +154,7 @@ export class FactorySystem {
         container.baseSprite = baseSprite;
 
         // Add machine type label at the top
-        const label = this.scene.add.text(0, -factoryHeight/2 + this.halfGridSize, type, {
+        const label = this.scene.add.text(0, -factoryHeight / 2 + this.halfGridSize, type, {
             fontSize: '18px',
             color: '#ffffff',
             align: 'center'
@@ -170,10 +170,10 @@ export class FactorySystem {
         // Add input markers
         inputPositions.forEach((pos, i) => {
             const marker = this.scene.add.rectangle(
-                -factoryWidth/2,  // Left side
+                -factoryWidth / 2,  // Left side
                 pos,
-                this.halfGridSize/2,  // Smaller marker size
-                this.halfGridSize/2,
+                this.halfGridSize / 2,  // Smaller marker size
+                this.halfGridSize / 2,
                 0x3333ff
             );
             container.add(marker);
@@ -181,19 +181,19 @@ export class FactorySystem {
 
             // Add input label
             const inputLabel = this.scene.add.text(
-                -factoryWidth/2 + this.halfGridSize/2,
+                -factoryWidth / 2 + this.halfGridSize / 2,
                 pos,
                 `In ${i + 1}`,
-                { fontSize: '12px', color: '#ffffff' }
+                {fontSize: '12px', color: '#ffffff'}
             ).setOrigin(0, 0.5);
             container.add(inputLabel);
 
             // Add input connection arrow
             const inputArrow = this.scene.add.text(
-                -factoryWidth/2 - this.halfGridSize/2,
+                -factoryWidth / 2 - this.halfGridSize / 2,
                 pos,
                 '→',  // Unicode arrow pointing into machine
-                { fontSize: '16px', color: '#3333ff' }
+                {fontSize: '16px', color: '#3333ff'}
             ).setOrigin(1, 0.5);
             container.add(inputArrow);
         });
@@ -204,10 +204,10 @@ export class FactorySystem {
         // Add output markers
         outputPositions.forEach((pos, i) => {
             const marker = this.scene.add.rectangle(
-                factoryWidth/2,  // Right side
+                factoryWidth / 2,  // Right side
                 pos,
-                this.halfGridSize/2,  // Smaller marker size
-                this.halfGridSize/2,
+                this.halfGridSize / 2,  // Smaller marker size
+                this.halfGridSize / 2,
                 0xff3333
             );
             container.add(marker);
@@ -215,30 +215,34 @@ export class FactorySystem {
 
             // Add output label
             const outputLabel = this.scene.add.text(
-                factoryWidth/2 - this.halfGridSize/2,
+                factoryWidth / 2 - this.halfGridSize / 2,
                 pos,
                 `Out ${i + 1}`,
-                { fontSize: '12px', color: '#ffffff' }
+                {fontSize: '12px', color: '#ffffff'}
             ).setOrigin(1, 0.5);
             container.add(outputLabel);
 
             // Add output connection arrow
             const outputArrow = this.scene.add.text(
-                factoryWidth/2 + this.halfGridSize/2,
+                factoryWidth / 2 + this.halfGridSize / 2,
                 pos,
                 '→',  // Unicode arrow pointing outward from machine
-                { fontSize: '16px', color: '#ff3333' }
+                {fontSize: '16px', color: '#ff3333'}
             ).setOrigin(0, 0.5);
             container.add(outputArrow);
         });
 
         // Set container properties
         container.setSize(factoryWidth, factoryHeight);
-        container.setInteractive(new Phaser.Geom.Rectangle(-factoryWidth/2, -factoryHeight/2, factoryWidth, factoryHeight),
+        container.setInteractive(new Phaser.Geom.Rectangle(-factoryWidth / 2, -factoryHeight / 2, factoryWidth, factoryHeight),
             Phaser.Geom.Rectangle.Contains);
 
         container.id = Date.now().toString();
         container.type = type;
+
+        if (recipe) {
+            container.recipe = recipe;
+        }
 
         // Add to factories array
         this.factories.push(container);
