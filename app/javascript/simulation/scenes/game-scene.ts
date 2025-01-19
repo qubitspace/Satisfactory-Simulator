@@ -176,11 +176,22 @@ export class GameScene extends Phaser.Scene {
     }
 
     private saveGame(): void {
-        if (this.mode !== 'sandbox' || !this.saveName) return;
+        if (this.mode !== 'sandbox') return;
 
-        const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
-        saveGame(simulationScene, this.saveName);
-        this.showSaveIndicator('Game Saved');
+        // Generate a default save name if none exists
+        if (!this.saveName) {
+            this.saveName = `Save_${new Date().toISOString().slice(0,19).replace(/[^0-9]/g, '_')}`;
+        }
+
+        try {
+            const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
+            saveGame(simulationScene, this.saveName);
+            console.log(`Game saved as: ${this.saveName}`);
+            this.showSaveIndicator('Game Saved');
+        } catch (error) {
+            console.error('Failed to save game:', error);
+            this.showSaveIndicator('Save Failed!');
+        }
     }
 
     private loadSaveState(saveState: SaveState): void {

@@ -24,6 +24,7 @@ export class FactorySystem {
     private selectedFactories: Set<Factory> = new Set();
     private isDragging: boolean = false;
     private gridSize = 64;
+    private halfGridSize = 32; // New: For half-grid snapping
     private worldWidth: number;
     private worldHeight: number;
     private gameData: GameData;
@@ -45,7 +46,6 @@ export class FactorySystem {
                 const clickedFactory = this.getFactoryAt(pointer.worldX, pointer.worldY);
 
                 if (clickedFactory) {
-                    // Handle selection
                     if (pointer.event.ctrlKey || pointer.event.metaKey) {
                         this.toggleFactorySelection(clickedFactory);
                     } else {
@@ -55,7 +55,6 @@ export class FactorySystem {
                         }
                     }
 
-                    // Start dragging if factory is selected
                     if (this.selectedFactories.has(clickedFactory)) {
                         this.isDragging = true;
                         dragStartPointerWorld = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
@@ -75,14 +74,18 @@ export class FactorySystem {
             if (this.isDragging) {
                 const currentWorldPos = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
 
-                // Calculate potential new positions
                 let potentialPositions: { x: number, y: number }[] = [];
                 this.selectedFactories.forEach(factory => {
                     if (factory.dragStartRelativeX !== undefined &&
                         factory.dragStartRelativeY !== undefined) {
-                        const newX = currentWorldPos.x + factory.dragStartRelativeX;
-                        const newY = currentWorldPos.y + factory.dragStartRelativeY;
-                        potentialPositions.push({ x: newX, y: newY });
+                        const rawX = currentWorldPos.x + factory.dragStartRelativeX;
+                        const rawY = currentWorldPos.y + factory.dragStartRelativeY;
+
+                        // Snap to half-grid
+                        const snappedX = Math.round(rawX / this.halfGridSize) * this.halfGridSize;
+                        const snappedY = Math.round(rawY / this.halfGridSize) * this.halfGridSize;
+
+                        potentialPositions.push({ x: snappedX, y: snappedY });
                     }
                 });
 
@@ -94,12 +97,11 @@ export class FactorySystem {
                         pos.y > this.worldHeight - this.gridSize / 2;
                 });
 
-                // Update positions if in bounds
                 if (!isOutOfBounds) {
                     potentialPositions.forEach((pos, index) => {
                         const factory = Array.from(this.selectedFactories)[index];
-                        factory.x = Math.round(pos.x / this.gridSize) * this.gridSize;
-                        factory.y = Math.round(pos.y / this.gridSize) * this.gridSize;
+                        factory.x = pos.x;
+                        factory.y = pos.y;
                     });
                 }
             }
@@ -120,31 +122,40 @@ export class FactorySystem {
         const machine = this.gameData.getMachine(type);
         if (!machine) {
             console.error(`Machine type ${type} not found`);
-            // Create a default factory instead of returning undefined
             return this.createDefaultFactory(worldX, worldY);
         }
 
-        // Calculate factory size based on inputs/outputs
         const maxPorts = Math.max(machine.inputCount, machine.outputCount);
-        const factoryHeight = (maxPorts + 1) * this.gridSize; // +1 for padding
-        const factoryWidth = 3 * this.gridSize; // 2 grid squares wide
+        let factoryHeight: number;
+        let factoryWidth: number;
 
-        // Snap to grid, centering on the click point
-        const snappedX = Math.round(worldX / this.gridSize) * this.gridSize;
-        const snappedY = Math.round(worldY / this.gridSize) * this.gridSize;
+        if (maxPorts <= 1) {
+            factoryHeight = 2 * this.gridSize;
+            factoryWidth = 3 * this.gridSize;
+        } else if (maxPorts <= 3) {
+            factoryHeight = 3 * this.gridSize;
+            factoryWidth = 4 * this.gridSize;
+        } else {
+            factoryHeight = 5 * this.gridSize;
+            factoryWidth = 5 * this.gridSize;
+        }
 
-        // Create a container for the factory
+        // Snap to half-grid
+        const snappedX = Math.round(worldX / this.halfGridSize) * this.halfGridSize;
+        const snappedY = Math.round(worldY / this.halfGridSize) * this.halfGridSize;
+
+        // Create container
         const container = this.scene.add.container(snappedX, snappedY) as Factory;
 
-        // Create base sprite - a larger rectangle
+        // Create base sprite
         const baseSprite = this.scene.add.rectangle(0, 0, factoryWidth, factoryHeight, 0x666666);
         baseSprite.setStrokeStyle(2, 0x999999);
         container.add(baseSprite);
         container.baseSprite = baseSprite;
 
-        // Add machine type label
-        const label = this.scene.add.text(0, 0, type, {
-            fontSize: '14px',
+        // Add machine type label at the top
+        const label = this.scene.add.text(0, -factoryHeight/2 + this.halfGridSize, type, {
+            fontSize: '18px',
             color: '#ffffff',
             align: 'center'
         }).setOrigin(0.5, 0.5);
@@ -153,13 +164,16 @@ export class FactorySystem {
         container.inputMarkers = [];
         container.outputMarkers = [];
 
-        // Add input markers - one per grid square on left side
-        for (let i = 0; i < machine.inputCount; i++) {
+        // Calculate grid positions for inputs
+        const inputPositions = this.calculatePortPositions(machine.inputCount, true, factoryHeight);
+
+        // Add input markers
+        inputPositions.forEach((pos, i) => {
             const marker = this.scene.add.rectangle(
                 -factoryWidth/2,  // Left side
-                -factoryHeight/2 + (i + 1) * this.gridSize,  // Spaced by grid size
-                this.gridSize/4,  // Marker size
-                this.gridSize/4,
+                pos,
+                this.halfGridSize/2,  // Smaller marker size
+                this.halfGridSize/2,
                 0x3333ff
             );
             container.add(marker);
@@ -167,21 +181,33 @@ export class FactorySystem {
 
             // Add input label
             const inputLabel = this.scene.add.text(
-                -factoryWidth/2 + this.gridSize/3,
-                -factoryHeight/2 + (i + 1) * this.gridSize,
+                -factoryWidth/2 + this.halfGridSize/2,
+                pos,
                 `In ${i + 1}`,
                 { fontSize: '12px', color: '#ffffff' }
             ).setOrigin(0, 0.5);
             container.add(inputLabel);
-        }
 
-        // Add output markers - one per grid square on right side
-        for (let i = 0; i < machine.outputCount; i++) {
+            // Add input connection arrow
+            const inputArrow = this.scene.add.text(
+                -factoryWidth/2 - this.halfGridSize/2,
+                pos,
+                '→',  // Unicode arrow pointing into machine
+                { fontSize: '16px', color: '#3333ff' }
+            ).setOrigin(1, 0.5);
+            container.add(inputArrow);
+        });
+
+        // Calculate grid positions for outputs
+        const outputPositions = this.calculatePortPositions(machine.outputCount, false, factoryHeight);
+
+        // Add output markers
+        outputPositions.forEach((pos, i) => {
             const marker = this.scene.add.rectangle(
                 factoryWidth/2,  // Right side
-                -factoryHeight/2 + (i + 1) * this.gridSize,  // Spaced by grid size
-                this.gridSize/4,
-                this.gridSize/4,
+                pos,
+                this.halfGridSize/2,  // Smaller marker size
+                this.halfGridSize/2,
                 0xff3333
             );
             container.add(marker);
@@ -189,13 +215,22 @@ export class FactorySystem {
 
             // Add output label
             const outputLabel = this.scene.add.text(
-                factoryWidth/2 - this.gridSize/3,
-                -factoryHeight/2 + (i + 1) * this.gridSize,
+                factoryWidth/2 - this.halfGridSize/2,
+                pos,
                 `Out ${i + 1}`,
                 { fontSize: '12px', color: '#ffffff' }
             ).setOrigin(1, 0.5);
             container.add(outputLabel);
-        }
+
+            // Add output connection arrow
+            const outputArrow = this.scene.add.text(
+                factoryWidth/2 + this.halfGridSize/2,
+                pos,
+                '→',  // Unicode arrow pointing outward from machine
+                { fontSize: '16px', color: '#ff3333' }
+            ).setOrigin(0, 0.5);
+            container.add(outputArrow);
+        });
 
         // Set container properties
         container.setSize(factoryWidth, factoryHeight);
@@ -213,6 +248,25 @@ export class FactorySystem {
         this.setupFactoryEvents(container);
 
         return container;
+    }
+
+    private calculatePortPositions(portCount: number, isInput: boolean, factoryHeight: number): number[] {
+        const positions: number[] = [];
+
+        // Calculate total height needed for ports with full grid spacing
+        const totalPortsHeight = (portCount - 1) * this.gridSize;
+
+        // Calculate start position to center ports in the lower portion of the factory
+        // Reserve top grid square for the label
+        const usableHeight = factoryHeight - this.gridSize;
+        const startY = -usableHeight/2 + this.gridSize/2; // Move down by half a grid to account for label
+
+        // Place ports one grid apart
+        for (let i = 0; i < portCount; i++) {
+            positions.push(startY + (i * this.gridSize));
+        }
+
+        return positions;
     }
 
     private createDefaultFactory(worldX: number, worldY: number): Factory {
