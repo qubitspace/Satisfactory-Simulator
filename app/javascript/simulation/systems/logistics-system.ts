@@ -1,4 +1,4 @@
-import {LogisticNode} from "./types";
+import {LogisticNode} from "../types";
 
 export class LogisticSystem {
     private scene: Phaser.Scene;

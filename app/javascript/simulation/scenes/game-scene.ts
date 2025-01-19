@@ -1,6 +1,7 @@
 import GameData, { Machine, Recipe, Item } from '../types';
 import { SimulationScene } from './simulation-scene';
-import {saveGame, loadGame, deleteSave, getSaves, SaveState} from '../save-system';
+import {saveGame, loadGame, deleteSave, getSaves, SaveState} from '../systems/save-system';
+import {updateUrlParam} from "../index";
 
 interface GameSceneData {
     mode: 'sandbox' | 'level';
@@ -28,6 +29,7 @@ export class GameScene extends Phaser.Scene {
         this.mode = data.mode;
         this.levelId = data.levelId;
         this.saveName = data.saveName;
+        console.log('GameScene init:', this.mode, this.levelId, this.saveName);
 
         // Stop other scenes
         this.scene.stop('main-menu');
@@ -36,7 +38,8 @@ export class GameScene extends Phaser.Scene {
 
         // If we have a save state, we'll load it after the simulation scene is created
         if (data.saveState) {
-            this.events.once('create-complete', () => {
+            const simScene = this.scene.get('simulation-scene');
+            simScene.events.once('simulation-scene-ready', () => {
                 this.loadSaveState(data.saveState!);
             });
         }
@@ -59,6 +62,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     create(): void {
+        console.log('[GameScene.create]', 'mode=', this.mode, 'saveName=', this.saveName);
 
         // 1) Check ?saveName= in the URL
         const urlParams = new URLSearchParams(window.location.search);
@@ -73,13 +77,14 @@ export class GameScene extends Phaser.Scene {
         }
 
         // 3) If we found a saveName, we do an immediate load if it exists;
-        if (this.mode === 'sandbox' && paramSaveName && !this.saveName) {
+        if (this.mode === 'sandbox' && paramSaveName) {
             // We only do this if the game wasn’t specifically launched with a “saveName” in init()
             this.loadedFromURLParam = true;
             const loadedState = loadGame(paramSaveName);
             if (loadedState) {
                 this.saveName = paramSaveName;
-                this.events.once('create-complete', () => {
+                const simScene = this.scene.get('simulation-scene');
+                simScene.events.once('simulation-scene-ready', () => {
                     this.loadSaveState(loadedState);
                 });
             } else {
@@ -110,7 +115,8 @@ export class GameScene extends Phaser.Scene {
         window.addEventListener('resize', () => this.handleResize());
         window.addEventListener('beforeunload', this.handleBeforeUnload);
 
-        this.events.emit("scene-ready");
+        console.log('GameScene.create complete');
+        this.events.emit("game-scene-ready");
     }
 
     private createUI(): void {
@@ -232,6 +238,7 @@ export class GameScene extends Phaser.Scene {
             console.log(`Game saved as: ${this.saveName}`);
             this.showSaveIndicator('Game Saved');
             localStorage.setItem('lastActiveSave', this.saveName);
+            updateUrlParam('saveName', this.saveName);
         } catch (error) {
             console.error('Failed to save game:', error);
             this.showSaveIndicator('Save Failed!');
@@ -239,20 +246,26 @@ export class GameScene extends Phaser.Scene {
     }
 
     private loadSaveState(saveState: SaveState): void {
-        console.log("loadSavedState");
+        console.log("loadSavedState", saveState);
         const simulationScene = this.scene.get('simulation-scene') as SimulationScene;
+
+        if (!simulationScene) {
+            console.error('Failed to get simulation scene');
+            return;
+        }
 
         simulationScene.clearFactories();
 
         // Need to wait for next frame to ensure simulation scene is ready
         this.time.delayedCall(0, () => {
+            console.log('Recreating factories from save state:', saveState.factories.length);
             // Recreate factories from save state
-            saveState.factories.forEach((f) => {
-                const worldX = f.x;
-                const worldY = f.y;
+            saveState.factories.forEach((f, index) => {
+                console.log(`Creating factory ${index + 1}:`, f);
                 simulationScene.createFactory(f.x, f.y, f.type, f.recipe);
             });
 
+            console.log('Factory recreation complete');
             this.showSaveIndicator('Game Loaded');
         });
     }

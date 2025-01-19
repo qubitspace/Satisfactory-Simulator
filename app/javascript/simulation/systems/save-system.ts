@@ -3,7 +3,7 @@
 // Saves can only be loaded for the matching mode/level.
 
 
-import { SimulationScene } from './scenes/simulation-scene';
+import { SimulationScene } from '../scenes/simulation-scene';
 
 export interface FactoryState {
     x: number;

@@ -1,7 +1,7 @@
 // /app/javascript/simulation/factory-system.ts
 
 import Phaser from 'phaser';
-import GameData from './types';
+import GameData from '../types';
 import {Transport} from "./transport-system";
 
 export interface Factory extends Phaser.GameObjects.Container {

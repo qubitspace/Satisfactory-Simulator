@@ -1,5 +1,5 @@
-import {TransportSystem} from "../transport-system";
-import {Factory, FactorySystem} from "../factory-system";
+import {TransportSystem} from "../systems/transport-system";
+import {Factory, FactorySystem} from "../systems/factory-system";
 
 interface SimulationData {
     mode: 'sandbox' | 'level';
@@ -73,7 +73,9 @@ export class SimulationScene extends Phaser.Scene {
         if (this.gameMode === 'level') {
             this.createLevelUI();
         }
-        this.events.emit('create-complete');
+
+        console.log('SimulationScene created');
+        this.events.emit('simulation-scene-ready');
     }
 
     public getFactories(): Factory[] {

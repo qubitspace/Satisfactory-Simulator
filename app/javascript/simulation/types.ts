@@ -1,5 +1,5 @@
 // types.ts
-import {Transport} from "./transport-system";
+import {Transport} from "./systems/transport-system";
 
 export interface ConnectionNode {
     id: string;
