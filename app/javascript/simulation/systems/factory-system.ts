@@ -1,4 +1,4 @@
-// /app/javascript/simulation/factory-system.ts
+// /app/javascript/simulation/systems/factory-system.ts
 
 import Phaser from 'phaser';
 import GameData from '../types';
@@ -17,6 +17,7 @@ export interface Factory extends Phaser.GameObjects.Container {
     outputMarkers: Phaser.GameObjects.Rectangle[];
     inputConnections: Map<number, Transport>;
     outputConnections: Map<number, Transport>;
+    connectedBelts: Set<Transport>;
 }
 
 export class FactorySystem {
@@ -24,7 +25,7 @@ export class FactorySystem {
     private selectedFactories: Set<Factory> = new Set();
     private isDragging: boolean = false;
     private gridSize = 64;
-    private halfGridSize = 32; // New: For half-grid snapping
+    private halfGridSize = 32;
     private worldWidth: number;
     private worldHeight: number;
     private gameData: GameData;
@@ -36,12 +37,19 @@ export class FactorySystem {
         this.worldHeight = (scene as any).worldHeight || 6000;
         this.gameData = GameData.getInstance();
         this.setupInputHandlers();
+        this.setupDoubleClickHandler();
     }
 
     private setupInputHandlers(): void {
         let dragStartPointerWorld: { x: number, y: number };
 
         this.scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            // Skip if transport system is creating a belt
+            const transportSystem = (this.scene as any).transportSystem;
+            if (transportSystem && transportSystem.isCreatingBelt()) {
+                return;
+            }
+
             if (pointer.leftButtonDown()) {
                 const clickedFactory = this.getFactoryAt(pointer.worldX, pointer.worldY);
 
@@ -71,6 +79,12 @@ export class FactorySystem {
         });
 
         this.scene.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+            // Skip if transport system is creating a belt
+            const transportSystem = (this.scene as any).transportSystem;
+            if (transportSystem && transportSystem.isCreatingBelt()) {
+                return;
+            }
+
             if (this.isDragging) {
                 const currentWorldPos = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
 
@@ -81,7 +95,6 @@ export class FactorySystem {
                         const rawX = currentWorldPos.x + factory.dragStartRelativeX;
                         const rawY = currentWorldPos.y + factory.dragStartRelativeY;
 
-                        // Snap to half-grid
                         const snappedX = Math.round(rawX / this.halfGridSize) * this.halfGridSize;
                         const snappedY = Math.round(rawY / this.halfGridSize) * this.halfGridSize;
 
@@ -89,7 +102,6 @@ export class FactorySystem {
                     }
                 });
 
-                // Check boundaries
                 const isOutOfBounds = potentialPositions.some(pos => {
                     return pos.x < this.gridSize / 2 ||
                         pos.x > this.worldWidth - this.gridSize / 2 ||
@@ -100,8 +112,31 @@ export class FactorySystem {
                 if (!isOutOfBounds) {
                     potentialPositions.forEach((pos, index) => {
                         const factory = Array.from(this.selectedFactories)[index];
+                        const oldX = factory.x;
+                        const oldY = factory.y;
+
+                        // Move factory
                         factory.x = pos.x;
                         factory.y = pos.y;
+
+                        // Update connected belts if they exist
+                        if (factory.connectedBelts && typeof factory.connectedBelts.forEach === 'function') {
+                            factory.connectedBelts.forEach(belt => {
+                                const deltaX = pos.x - oldX;
+                                const deltaY = pos.y - oldY;
+
+                                // Find the connected point and move it
+                                const point = belt.points.find(p => p.connection?.nodeId === factory.id);
+                                if (point) {
+                                    point.x += deltaX;
+                                    point.y += deltaY;
+                                    const transportSystem = (this.scene as any).transportSystem;
+                                    if (transportSystem?.updateTransportVisuals) {
+                                        transportSystem.updateTransportVisuals(belt);
+                                    }
+                                }
+                            });
+                        }
                     });
                 }
             }
@@ -116,6 +151,50 @@ export class FactorySystem {
                 });
             }
         });
+    }
+
+    private setupDoubleClickHandler(): void {
+        let lastClickTime = 0;
+        const doubleClickDelay = 300; // ms between clicks to count as double click
+
+        this.scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            const currentTime = new Date().getTime();
+            const timeSinceLastClick = currentTime - lastClickTime;
+
+            if (timeSinceLastClick < doubleClickDelay) {
+                // Double click detected
+                const worldPoint = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
+                const clickedFactory = this.getFactoryAt(worldPoint.x, worldPoint.y);
+
+                if (clickedFactory) {
+                    this.deleteFactory(clickedFactory);
+                }
+            }
+
+            lastClickTime = currentTime;
+        });
+    }
+
+    public deleteFactory(factory: Factory): void {
+        // Delete connected belts first
+        if (factory.connectedBelts) {
+            const transportSystem = (this.scene as any).transportSystem;
+            if (transportSystem) {
+                // Create array from Set to avoid modification during iteration
+                Array.from(factory.connectedBelts).forEach(belt => {
+                    transportSystem.deleteBelt(belt);
+                });
+            }
+        }
+
+        // Remove from factories array
+        const index = this.factories.indexOf(factory);
+        if (index !== -1) {
+            this.factories.splice(index, 1);
+        }
+
+        // Destroy the Phaser game object
+        factory.destroy();
     }
 
     public createFactory(worldX: number, worldY: number, type: string = 'Constructor', recipe?: string): Factory {

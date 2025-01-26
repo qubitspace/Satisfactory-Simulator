@@ -1,15 +1,17 @@
-// /app/javascript/simulation/transport-system.ts
+// /app/javascript/simulation/systems/transport-system.ts
 
 import Phaser from 'phaser';
+import {Factory} from "./factory-system";
 
 export interface TransportPoint {
     x: number;
     y: number;
     isHandle?: boolean;
+    preferredDirection?: 'north' | 'south' | 'east' | 'west';  // Added this property
     connection?: {
-        nodeId: string;  // ID of factory or logistic node
+        nodeId: string;
         nodeType: 'factory' | 'splitter' | 'merger';
-        portIndex: number;  // Index of the input/output port
+        portIndex: number;
         direction: 'north' | 'south' | 'east' | 'west';
     };
 }
@@ -24,7 +26,7 @@ export interface Transport {
 export class TransportSystem {
     private currentTransport: Transport | null = null;
     private transports: Transport[] = [];
-
+    private isCreatingBeltState: boolean = false;
     private isDraggingPoint: boolean = false;
     private selectedPoint: {
         transport: Transport,
@@ -32,26 +34,157 @@ export class TransportSystem {
         index: number
     } | null = null;
     private lastClickTime: number = 0;
-
     private gridSize = 64;
     private handleSize = 10;
-    private connectingToTransport: Transport | null = null;
-    private connectingFromPoint: TransportPoint | null = null;
-
     private scene: Phaser.Scene;
 
     constructor(scene: Phaser.Scene) {
         this.scene = scene;
         this.setupInputHandlers();
+        this.setupDoubleClickHandler();
+    }
+
+    private setupDoubleClickHandler(): void {
+        let lastClickTime = 0;
+        const doubleClickDelay = 300;
+
+        this.scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            const currentTime = new Date().getTime();
+            const timeSinceLastClick = currentTime - lastClickTime;
+
+            if (timeSinceLastClick < doubleClickDelay) {
+                // Double click detected
+                const worldPoint = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
+                const clickedBelt = this.findClickedBelt(worldPoint);
+
+                if (clickedBelt) {
+                    this.deleteBelt(clickedBelt);
+                }
+            }
+
+            lastClickTime = currentTime;
+        });
+    }
+
+    public deleteBelt(belt: Transport): void {
+        console.log("Deleting belt", belt);
+        // Remove belt references from connected factories
+        const startPoint = belt.points[0];
+        const endPoint = belt.points[belt.points.length - 1];
+
+        // Find and cleanup factory connections
+        const factorySystem = (this.scene as any).factorySystem;
+        if (factorySystem) {
+            const factories = factorySystem.getFactories();
+            factories.forEach((factory: Factory) => {
+                if (factory.connectedBelts?.has(belt)) {
+                    factory.connectedBelts.delete(belt);
+
+                    // Clean up input/output connections
+                    Array.from(factory.inputConnections.entries()).forEach(([key, value]) => {
+                        if (value === belt) {
+                            factory.inputConnections.delete(key);
+                        }
+                    });
+
+                    Array.from(factory.outputConnections.entries()).forEach(([key, value]) => {
+                        if (value === belt) {
+                            factory.outputConnections.delete(key);
+                        }
+                    });
+                }
+            });
+        }
+
+        // Remove from transports array
+        const index = this.transports.indexOf(belt);
+        if (index !== -1) {
+            this.transports.splice(index, 1);
+        }
+
+        // Destroy graphics
+        belt.graphics.destroy();
+    }
+
+    private findClickedBelt(point: { x: number, y: number }): Transport | null {
+        const clickThreshold = 10; // Distance in pixels to detect click on belt
+        const endpointThreshold = 20; // Distance to ignore near endpoints
+
+        for (const belt of this.transports) {
+            for (let i = 0; i < belt.points.length - 1; i++) {
+                const start = belt.points[i];
+                const end = belt.points[i + 1];
+
+                // Check if point is near this belt segment
+                const distance = this.pointToLineDistance(point, start, end);
+
+                // If near a belt segment
+                if (distance < clickThreshold) {
+                    // Check if we're too close to connected endpoints
+                    const distanceToStart = Math.sqrt(
+                        Math.pow(point.x - start.x, 2) +
+                        Math.pow(point.y - start.y, 2)
+                    );
+                    const distanceToEnd = Math.sqrt(
+                        Math.pow(point.x - end.x, 2) +
+                        Math.pow(point.y - end.y, 2)
+                    );
+
+                    // Only allow deletion if we're not near connected endpoints
+                    if ((start.connection && distanceToStart < endpointThreshold) ||
+                        (end.connection && distanceToEnd < endpointThreshold)) {
+                        continue;
+                    }
+
+                    return belt;
+                }
+            }
+        }
+        return null;
+    }
+
+    private pointToLineDistance(point: { x: number, y: number }, start: { x: number, y: number }, end: { x: number, y: number }): number {
+        const A = point.x - start.x;
+        const B = point.y - start.y;
+        const C = end.x - start.x;
+        const D = end.y - start.y;
+
+        const dot = A * C + B * D;
+        const len_sq = C * C + D * D;
+        let param = -1;
+
+        if (len_sq !== 0) {
+            param = dot / len_sq;
+        }
+
+        let xx, yy;
+
+        if (param < 0) {
+            xx = start.x;
+            yy = start.y;
+        } else if (param > 1) {
+            xx = end.x;
+            yy = end.y;
+        } else {
+            xx = start.x + param * C;
+            yy = start.y + param * D;
+        }
+
+        const dx = point.x - xx;
+        const dy = point.y - yy;
+
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    public isCreatingBelt(): boolean {
+        return this.isCreatingBeltState || this.currentTransport !== null;
     }
 
     private setupInputHandlers(): void {
-
         this.scene.events.on('start-belt-drag', (data: any) => {
             this.startNewBeltFromMarker(data.factory, data.marker, data.portIndex, data.portType);
         });
 
-        // Now we rely on pointerdown anywhere in the scene for either (1) dragging an existing belt point or (2) finishing a belt.
         this.scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (!pointer.leftButtonDown()) return;
 
@@ -73,50 +206,85 @@ export class TransportSystem {
             }
         });
 
-        // pointerup finishes dragging
         this.scene.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-            if (!pointer.leftButtonDown()) return;
-
+            // We check if there was a transport in progress, regardless of button state
             if (this.isDraggingPoint) {
                 this.finishDraggingPoint();
-            } else if (this.currentTransport) {
+            } else if (this.currentTransport || this.isCreatingBeltState) {
                 this.finishNewBelt();
             }
         });
     }
 
+    public updateBeltEndpoint(transport: Transport, factory: Factory, x: number, y: number) {
+        const point = transport.points.find(p => p.connection?.nodeId === factory.id);
+        if (point) {
+            point.x = x;
+            point.y = y;
+            this.updateTransportVisuals(transport);
+        }
+    }
+
+    private connectBeltToFactory(transport: Transport, factory: any, portIndex: number, portType: 'input' | 'output') {
+        // Ensure the factory has the required properties
+        if (!factory.connectedBelts) {
+            factory.connectedBelts = new Set();
+        }
+        if (!factory.inputConnections) {
+            factory.inputConnections = new Map();
+        }
+        if (!factory.outputConnections) {
+            factory.outputConnections = new Map();
+        }
+
+        factory.connectedBelts.add(transport);
+
+        if (portType === 'input') {
+            factory.inputConnections.set(portIndex, transport);
+        } else {
+            factory.outputConnections.set(portIndex, transport);
+        }
+    }
+
     private startNewBeltFromMarker(factory: any, marker: Phaser.GameObjects.Rectangle, portIndex: number, portType: 'input' | 'output'): void {
-        // Get world coords of the marker (since marker.x is local to container)
-        // factory.x + marker.x to get absolute in the scene, likewise for y.
+        this.isCreatingBeltState = true;
+
         const worldX = factory.x + marker.x;
         const worldY = factory.y + marker.y;
 
-        // Create a brand new belt with two points: the “start” point locked to the marker,
-        // plus a “temporary” second point that will follow the mouse pointer.
+        // Create connection point - this will be either start or end depending on port type
+        const connectionPoint: TransportPoint = {
+            x: worldX,
+            y: worldY,
+            isHandle: true,
+            connection: {
+                nodeId: factory.id,
+                nodeType: 'factory',
+                portIndex: portIndex,
+                direction: (portType === 'output') ? 'east' : 'west'
+            }
+        };
+
+        // Create movable point at same initial position
+        const movablePoint: TransportPoint = {
+            x: worldX,
+            y: worldY,
+            isHandle: true
+        };
+
+        // For output ports, connection is first point. For input ports, it's last point
+        const points = portType === 'output'
+            ? [connectionPoint, movablePoint]
+            : [movablePoint, connectionPoint];
+
         const newTransport: Transport = {
             id: Date.now().toString(),
-            points: [
-                {
-                    x: worldX,
-                    y: worldY,
-                    isHandle: true,
-                    // Optionally store info about this connection if you want
-                    connection: {
-                        nodeId: factory.id,
-                        nodeType: 'factory',
-                        portIndex: portIndex,
-                        direction: (portType === 'output') ? 'east' : 'west' // or figure out real direction
-                    }
-                },
-                {
-                    x: worldX,
-                    y: worldY,
-                    isHandle: true
-                }
-            ],
+            points: points,
             graphics: this.scene.add.graphics(),
             type: 'belt'
         };
+
+        this.connectBeltToFactory(newTransport, factory, portIndex, portType);
 
         this.currentTransport = newTransport;
         this.transports.push(newTransport);
@@ -125,20 +293,22 @@ export class TransportSystem {
 
     private updateNewBeltEndpoint(x: number, y: number): void {
         if (!this.currentTransport) return;
+
+        // Find which point should be moved (the one without a connection)
+        const movablePointIndex = this.currentTransport.points.findIndex(point => !point.connection);
+        if (movablePointIndex === -1) return;
+
         const snappedX = Math.round(x / this.gridSize) * this.gridSize;
         const snappedY = Math.round(y / this.gridSize) * this.gridSize;
 
-        const lastIdx = this.currentTransport.points.length - 1;
-        this.currentTransport.points[lastIdx].x = snappedX;
-        this.currentTransport.points[lastIdx].y = snappedY;
+        this.currentTransport.points[movablePointIndex].x = snappedX;
+        this.currentTransport.points[movablePointIndex].y = snappedY;
         this.updateTransportVisuals(this.currentTransport);
     }
 
-    // ADDED: finalize the belt once user lets go
     private finishNewBelt(): void {
-        // if the user is near some other marker, you could auto-connect.
-        // For now, we just keep the free end.
         this.currentTransport = null;
+        this.isCreatingBeltState = false;
     }
 
     // We still have the old system for dragging endpoints
@@ -218,7 +388,7 @@ export class TransportSystem {
     }
 
     private updateTransportVisuals(transport: Transport): void {
-        const pathPoints = this.calculatePath(transport.points);
+        const pathPoints = this.calculateSmartPath(transport.points);
         const graphics = transport.graphics;
         graphics.clear();
 
@@ -243,13 +413,109 @@ export class TransportSystem {
             }
         }
 
-        // If your original code drew or updated handles, do it here.
-        // For example, we can show circles at each endpoint:
-        for (let i = 0; i < transport.points.length; i++) {
-            const p = transport.points[i];
-            graphics.lineStyle(2, 0x00ff00);
-            graphics.strokeCircle(p.x, p.y, this.handleSize / 2);
+        // Draw handle points
+        for (const point of transport.points) {
+            if (point.isHandle) {
+                graphics.lineStyle(2, 0x00ff00);
+                graphics.strokeCircle(point.x, point.y, this.handleSize / 2);
+            }
         }
+    }
+
+    private calculateSmartPath(points: TransportPoint[]): TransportPoint[] {
+        if (points.length < 2) return points;
+
+        const path: TransportPoint[] = [];
+        for (let i = 0; i < points.length - 1; i++) {
+            const current = points[i];
+            const next = points[i + 1];
+
+            // Get preferred directions
+            const startDirection = current.connection?.direction || current.preferredDirection;
+            const endDirection = next.connection?.direction || next.preferredDirection;
+
+            // Add first point
+            path.push(current);
+
+            const dx = next.x - current.x;
+            const dy = next.y - current.y;
+
+            if (startDirection && endDirection) {
+                // Case 3: S-curve with both directions specified
+                path.push(...this.calculateSCurve(current, next, startDirection, endDirection));
+            } else if (startDirection) {
+                // Case 4: Start direction only
+                path.push(...this.calculateDirectedPath(current, next, startDirection, true));
+            } else if (endDirection) {
+                // Case 5: End direction only
+                path.push(...this.calculateDirectedPath(current, next, endDirection, false));
+            } else {
+                // Default case: simple 90-degree routing
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    // Go horizontal first
+                    path.push({ x: next.x, y: current.y });
+                } else {
+                    // Go vertical first
+                    path.push({ x: current.x, y: next.y });
+                }
+            }
+        }
+
+        // Add final point
+        path.push(points[points.length - 1]);
+        return path;
+    }
+
+    private calculateSCurve(
+        start: TransportPoint,
+        end: TransportPoint,
+        startDir: string,
+        endDir: string
+    ): TransportPoint[] {
+        const points: TransportPoint[] = [];
+        const midX = (start.x + end.x) / 2;
+        const midY = (start.y + end.y) / 2;
+
+        if (startDir === 'east' || startDir === 'west') {
+            // Move horizontally first
+            points.push({ x: midX, y: start.y });
+            // Then vertically
+            points.push({ x: midX, y: end.y });
+        } else {
+            // Move vertically first
+            points.push({ x: start.x, y: midY });
+            // Then horizontally
+            points.push({ x: end.x, y: midY });
+        }
+
+        return points;
+    }
+
+    private calculateDirectedPath(
+        start: TransportPoint,
+        end: TransportPoint,
+        direction: string,
+        isStartDirection: boolean
+    ): TransportPoint[] {
+        const points: TransportPoint[] = [];
+
+        if (isStartDirection) {
+            // Follow start direction as far as possible
+            if (direction === 'east' || direction === 'west') {
+                points.push({ x: end.x, y: start.y });
+            } else {
+                points.push({ x: start.x, y: end.y });
+            }
+        } else {
+            // Move to align with end direction
+            if (direction === 'east' || direction === 'west') {
+                points.push({ x: start.x, y: end.y });
+            } else {
+                points.push({ x: end.x, y: start.y });
+            }
+        }
+
+        return points;
     }
 
     private drawBeltPath(graphics: Phaser.GameObjects.Graphics, points: TransportPoint[]): void {
