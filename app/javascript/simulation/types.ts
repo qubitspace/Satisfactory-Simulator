@@ -1,24 +1,5 @@
 // types.ts
-import {Transport} from "./systems/transport-system";
 
-export interface ConnectionNode {
-    id: string;
-    type: 'input' | 'output';
-    direction: 'north' | 'south' | 'east' | 'west';
-    position: { x: number, y: number };
-    transport?: Transport;
-}
-
-export interface LogisticNode {
-    id: string;
-    type: 'splitter' | 'merger';
-    x: number;
-    y: number;
-    rotation: number;
-    inputs: ConnectionNode[];
-    outputs: ConnectionNode[];
-    isSelected?: boolean;
-}
 
 export interface Machine {
     name: string;
@@ -3274,6 +3255,10 @@ class GameData {
     public getRecipesForMachine(machineName: string): Recipe[] {
         return Array.from(this.recipes.values())
             .filter(recipe => recipe.machine === machineName);
+    }
+
+    public getAllRecipes(): Recipe[] {
+        return Array.from(this.recipes.values());
     }
 
     public getItem(name: string): Item | undefined {

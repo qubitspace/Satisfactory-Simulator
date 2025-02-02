@@ -2,7 +2,7 @@
 files:
 - path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/sandbox-select-scene.ts"
   readOnly: false
-- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/main-menu-scene.ts"
+- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/MainMenuScene.ts"
   readOnly: false
 - path: "C:/dev/rails/satsim/app/javascript/simulation/save-system.ts"
   readOnly: false
@@ -10,15 +10,15 @@ files:
   readOnly: false
 - path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/level-select-scene.ts"
   readOnly: false
-- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/toolbar-scene.ts"
+- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/ToolbarScene.ts"
   readOnly: false
 - path: "C:/dev/rails/satsim/app/javascript/application.js"
   readOnly: false
 - path: "C:/dev/rails/satsim/app/javascript/simulation/types.ts"
   readOnly: false
-- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/game-scene.ts"
+- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/GameScene.ts"
   readOnly: false
-- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/simulation-scene.ts"
+- path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/SimulationScene.ts"
   readOnly: false
 - path: "C:/dev/rails/satsim/app/assets/builds/application.js"
   readOnly: false

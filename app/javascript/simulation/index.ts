@@ -1,22 +1,9 @@
 
 import Phaser, { Types } from 'phaser'
-import { MainMenuScene } from './scenes/main-menu-scene'
-import { SandboxSelectScene } from './scenes/sandbox-select-scene'
-import { LevelSelectScene } from './scenes/level-select-scene'
-import { GameScene } from './scenes/game-scene'
-import { SimulationScene } from './scenes/simulation-scene'
-import { ToolbarScene } from './scenes/toolbar-scene'
-
-export function updateUrlParam(key: string, value: string) {
-    const url = new URL(window.location.href)
-    url.searchParams.set(key, value)
-    window.history.replaceState({}, '', url.toString())
-}
-
-function getUrlParam(name: string): string | null {
-    const params = new URLSearchParams(window.location.search)
-    return params.get(name)
-}
+import { MainMenuScene } from './scenes/MainMenuScene'
+import { GameScene } from './scenes/GameScene'
+import { SimulationScene } from './scenes/SimulationScene'
+import { ToolbarScene } from './scenes/ToolbarScene'
 
 document.addEventListener('DOMContentLoaded', () => {
     // (A) Create any DOM logic you want
@@ -35,10 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         height: window.innerHeight,
         backgroundColor: '#1a1a1a',
         scene: [
-            // We can list all scenes here
             MainMenuScene,
-            SandboxSelectScene,
-            LevelSelectScene,
             GameScene,
             SimulationScene,
             ToolbarScene
@@ -83,17 +67,4 @@ document.addEventListener('DOMContentLoaded', () => {
     // (E) Create the Phaser game instance
     const game = new Phaser.Game(config)
 
-    // (F) Check if the URL has ?saveName=...
-    const saveName = getUrlParam('saveName')
-    if (saveName) {
-        // Skip the main menu, jump straight to game-scene in sandbox mode:
-        // This passes { mode: 'sandbox', saveName } to your GameScene.init()
-        console.log('Starting game with save:', saveName)
-        game.scene.start('game-scene', { mode: 'sandbox', saveName })
-    } else {
-        console.log('No saveName found in URL')
-        // If no saveName, start main menu as usual (if your main menu isn't already auto-started)
-        // If your default scene is main-menu, you might not need this line at all
-        game.scene.start('main-menu')
-    }
 })

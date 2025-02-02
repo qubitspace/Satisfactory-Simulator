@@ -1,6 +1,6 @@
 export class MainMenuScene extends Phaser.Scene {
     constructor() {
-        super({ key: 'main-menu' });
+        super({ key: 'MainMenu' });
     }
 
     create(): void {
@@ -12,7 +12,7 @@ export class MainMenuScene extends Phaser.Scene {
             color: '#ffffff'
         }).setOrigin(0.5);
 
-        const sandboxButton = this.add.text(centerX, centerY, 'Sandbox', {
+        const playButton = this.add.text(centerX, centerY, 'Play', {
             fontSize: '32px',
             color: '#ffffff',
             backgroundColor: '#444444',
@@ -21,16 +21,12 @@ export class MainMenuScene extends Phaser.Scene {
             .setOrigin(0.5)
             .setInteractive();
 
-        const levelButton = this.add.text(centerX, centerY + 80, 'Play', {
-            fontSize: '32px',
-            color: '#ffffff',
-            backgroundColor: '#444444',
-            padding: { x: 20, y: 10 }
-        })
-            .setOrigin(0.5)
-            .setInteractive();
+        playButton.on('pointerdown', () => {
+            this.scene.start('SimulationScene');
+        });
 
-        [sandboxButton, levelButton].forEach(button => {
+        // Add mouse hover effects
+        [playButton].forEach(button => {
             button.on('pointerover', () => {
                 button.setBackgroundColor('#666666');
             });
@@ -38,14 +34,6 @@ export class MainMenuScene extends Phaser.Scene {
             button.on('pointerout', () => {
                 button.setBackgroundColor('#444444');
             });
-        });
-
-        sandboxButton.on('pointerdown', () => {
-            this.scene.start('sandbox-select');
-        });
-
-        levelButton.on('pointerdown', () => {
-            this.scene.start('level-select');
         });
     }
 }
