@@ -37,28 +37,6 @@ document.addEventListener('DOMContentLoaded', () => {
         parent: 'game-container'
     }
 
-    // (C) Insert a <style> to handle full screen container
-    const style = document.createElement('style')
-    style.textContent = `
-    body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      width: 100vw;
-      height: 100vh;
-    }
-    #game-container {
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
-      -webkit-user-select: none;
-      -moz-user-select: none;
-      -ms-user-select: none;
-      user-select: none;
-    }
-  `
-    document.head.appendChild(style)
-
     // (D) Optionally create a toolbar container
     const toolbarContainer = document.createElement('div')
     toolbarContainer.id = 'toolbar-container'

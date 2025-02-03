@@ -1,8 +1,8 @@
-import { FactoryManager } from '../directors/FactoryManager';
+import { FactoryDirector } from '../directors/FactoryDirector';
 
 export class SimulationScene extends Phaser.Scene {
     private readonly TOOLBAR_HEIGHT = 100;
-    private factoryDirector = new FactoryManager(this);
+    private factoryDirector = new FactoryDirector(this);
     private gridSize = 64;
     private worldWidth = 12000;
     private worldHeight = 6000;
@@ -17,7 +17,7 @@ export class SimulationScene extends Phaser.Scene {
 
     create(): void {
         // Create and initialize the factory director
-        this.factoryDirector = new FactoryManager(this);
+        this.factoryDirector = new FactoryDirector(this);
         this.factoryDirector.initialize();
 
         // Set up viewport with space for toolbar
@@ -47,7 +47,7 @@ export class SimulationScene extends Phaser.Scene {
                 overclockPercentage?: number;
                 isSomerslooped?: boolean;
             }) => {
-                this.factoryDirector.updateSelectedFactory(config);
+                this.factoryDirector.updateFactory(config);
             }
         );
 
