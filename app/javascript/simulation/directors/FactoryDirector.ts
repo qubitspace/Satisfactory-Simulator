@@ -6,8 +6,8 @@ import GameData from '../types';
 export interface Factory extends Phaser.GameObjects.Container {
     id: string;
     baseSprite: Phaser.GameObjects.Rectangle;
-    inputMarkers: Phaser.GameObjects.Rectangle[];
-    outputMarkers: Phaser.GameObjects.Rectangle[];
+    inputMarkers: Phaser.GameObjects.Container[];
+    outputMarkers: Phaser.GameObjects.Container[];
     isSelected: boolean;
     targetRecipe?: string;
     machineCount: number;
@@ -29,6 +29,55 @@ export class FactoryDirector {
     public initialize(): void {
         this.setupInputHandlers();
     }
+
+    private createInputMarker(x: number, y: number): Phaser.GameObjects.Container {
+        const container = this.scene.add.container(x, y);
+
+        // Create the orange square background
+        const square = this.scene.add.rectangle(0, 0, this.MARKER_SIZE, this.MARKER_SIZE, 0xFFA500);
+        container.add(square);
+
+        // Create arrow pointing right (towards factory)
+        const graphics = this.scene.add.graphics();
+        graphics.lineStyle(3, 0x000000);  // Black arrow
+
+        // Draw arrow
+        graphics.beginPath();
+        graphics.moveTo(-this.MARKER_SIZE/4, 0);  // Start from left side
+        graphics.lineTo(this.MARKER_SIZE/4, 0);   // Line to right side
+        graphics.moveTo(0, -this.MARKER_SIZE/4);  // Top of arrowhead
+        graphics.lineTo(this.MARKER_SIZE/4, 0);   // Right point of arrowhead
+        graphics.lineTo(0, this.MARKER_SIZE/4);   // Bottom of arrowhead
+        graphics.strokePath();
+
+        container.add(graphics);
+        return container;
+    }
+
+    private createOutputMarker(x: number, y: number): Phaser.GameObjects.Container {
+        const container = this.scene.add.container(x, y);
+
+        // Create the blue square background
+        const square = this.scene.add.rectangle(0, 0, this.MARKER_SIZE, this.MARKER_SIZE, 0x3333FF);
+        container.add(square);
+
+        // Create arrow pointing left (away from factory)
+        const graphics = this.scene.add.graphics();
+        graphics.lineStyle(3, 0x000000);  // Black arrow
+
+        // Draw arrow
+        graphics.beginPath();
+        graphics.moveTo(-this.MARKER_SIZE/4, 0);  // Start from left side
+        graphics.lineTo(this.MARKER_SIZE/4, 0);   // Line to right side
+        graphics.moveTo(0, -this.MARKER_SIZE/4);  // Top of arrowhead
+        graphics.lineTo(this.MARKER_SIZE/4, 0);   // Right point of arrowhead
+        graphics.lineTo(0, this.MARKER_SIZE/4);   // Bottom of arrowhead
+        graphics.strokePath();
+
+        container.add(graphics);
+        return container;
+    }
+
 
     private setupInputHandlers(): void {
         this.scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -77,12 +126,9 @@ export class FactoryDirector {
         const inputSpacing = factoryHeight / (inputCount + 1);
         for (let i = 0; i < inputCount; i++) {
             const y = -factoryHeight / 2 + inputSpacing * (i + 1);
-            const marker = this.scene.add.rectangle(
-                -factoryWidth / 2,
-                y,
-                this.MARKER_SIZE,
-                this.MARKER_SIZE,
-                0x3333ff
+            const marker = this.createInputMarker(
+                -factoryWidth / 2 - this.GRID_SIZE / 2,
+                y
             );
             factory.add(marker);
             factory.inputMarkers.push(marker);
@@ -92,12 +138,9 @@ export class FactoryDirector {
         const outputSpacing = factoryHeight / (outputCount + 1);
         for (let i = 0; i < outputCount; i++) {
             const y = -factoryHeight / 2 + outputSpacing * (i + 1);
-            const marker = this.scene.add.rectangle(
-                factoryWidth / 2,
-                y,
-                this.MARKER_SIZE,
-                this.MARKER_SIZE,
-                0xff3333
+            const marker = this.createOutputMarker(
+                factoryWidth / 2 + this.GRID_SIZE / 2,
+                y
             );
             factory.add(marker);
             factory.outputMarkers.push(marker);
@@ -127,12 +170,22 @@ export class FactoryDirector {
 
         factory.on('dragstart', (pointer: Phaser.Input.Pointer) => {
             factory.setData('dragOffset', { x: pointer.x - factory.x, y: pointer.y - factory.y });
+            factory.setDepth(1);
         });
 
         factory.on('drag', (pointer: Phaser.Input.Pointer, dragX: number, dragY: number) => {
             const snappedX = Math.round(dragX / this.GRID_SIZE) * this.GRID_SIZE;
             const snappedY = Math.round(dragY / this.GRID_SIZE) * this.GRID_SIZE;
-            factory.setPosition(snappedX, snappedY);
+
+            // Only update position if there's no collision at the new position
+            if (!this.checkCollision(factory, snappedX, snappedY)) {
+                factory.setPosition(snappedX, snappedY);
+            }
+        });
+
+        factory.on('dragend', () => {
+            // Reset depth when dragging ends
+            factory.setDepth(0);
         });
     }
 
@@ -152,6 +205,7 @@ export class FactoryDirector {
         // Update the interactive (draggable) hit area to match the new size
         this.updateInteractiveArea(factory, factoryWidth, factoryHeight);
     }
+
 
     private updateConfigText(factory: Factory): void {
         const configText = factory.getByName('configText') as Phaser.GameObjects.Text;
@@ -255,6 +309,28 @@ export class FactoryDirector {
             this.scene.game.events.emit('factory-deselected', this.selectedFactory);
             this.selectedFactory = null;
         }
+    }
+
+    private checkCollision(factory: Factory, x: number, y: number): boolean {
+        const testBounds = new Phaser.Geom.Rectangle(
+            x - factory.width / 2,
+            y - factory.height / 2,
+            factory.width,
+            factory.height
+        );
+
+        return this.factories.some(other => {
+            if (other === factory) return false;
+
+            const otherBounds = new Phaser.Geom.Rectangle(
+                other.x - other.width / 2,
+                other.y - other.height / 2,
+                other.width,
+                other.height
+            );
+
+            return Phaser.Geom.Rectangle.Overlaps(testBounds, otherBounds);
+        });
     }
 
     public destroy(): void {
