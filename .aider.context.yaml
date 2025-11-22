@@ -6,7 +6,7 @@ files:
   readOnly: false
 - path: "C:/dev/rails/satsim/app/javascript/simulation/save-system.ts"
   readOnly: false
-- path: "C:/dev/rails/satsim/app/javascript/simulation/index.ts"
+- path: "C:/dev/rails/satsim/app/javascript/simulation/config.ts"
   readOnly: false
 - path: "C:/dev/rails/satsim/app/javascript/simulation/scenes/level-select-scene.ts"
   readOnly: false
