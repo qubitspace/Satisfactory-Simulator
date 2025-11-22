@@ -25,6 +25,9 @@ class Factory extends Phaser.GameObjects.Container implements InteractiveObject 
         const pixelW = w * tileSize;
         const pixelH = h * tileSize;
 
+        // Set the logical size of the container to match the factory footprint.
+        // For Phaser Containers, (x, y) already act as the top-left corner for
+        // our visual rectangle below, so we don't use setOrigin here.
         this.setSize(pixelW, pixelH);
 
         // Visuals (Top-Left Aligned inside Container)
@@ -40,10 +43,6 @@ class Factory extends Phaser.GameObjects.Container implements InteractiveObject 
 
         this.add([this.highlight, bg, text]);
         scene.add.existing(this);
-
-        // Make Interactive
-        this.setInteractive(new Phaser.Geom.Rectangle(0, 0, pixelW, pixelH), Phaser.Geom.Rectangle.Contains);
-        scene.input.setDraggable(this);
     }
 
     select() { this.highlight.setVisible(true); }
@@ -62,7 +61,8 @@ class Factory extends Phaser.GameObjects.Container implements InteractiveObject 
     }
 
     containsPoint(x: number, y: number): boolean {
-        // Simple AABB check (x,y are Top-Left of container)
+        // Simple AABB check using the factory's top-left position as origin
+        // (matches the visual footprint of the factory rectangle).
         return x >= this.x && x <= this.x + this.width &&
             y >= this.y && y <= this.y + this.height;
     }
@@ -76,6 +76,10 @@ class Belt implements InteractiveObject {
     private h2: Phaser.GameObjects.Arc;
     private isSelected: boolean = false;
 
+    // Per-endpoint selection state so we can treat each end as a draggable item.
+    private end1Selected: boolean = false;
+    private end2Selected: boolean = false;
+
     // Coordinates are CENTER of tiles
     public x1: number; public y1: number;
     public x2: number; public y2: number;
@@ -84,10 +88,9 @@ class Belt implements InteractiveObject {
         this.scene = scene;
         this.tileSize = tileSize;
 
-        // Offset to Center of Tile
-        const offset = tileSize / 2;
-        this.x1 = x1 + offset; this.y1 = y1 + offset;
-        this.x2 = x2 + offset; this.y2 = y2 + offset;
+        // Belt endpoints are defined directly in world coordinates at tile centers.
+        this.x1 = x1; this.y1 = y1;
+        this.x2 = x2; this.y2 = y2;
 
         this.gameObject = scene.add.graphics();
         this.h1 = this.createHandle(this.x1, this.y1, 1);
@@ -111,6 +114,29 @@ class Belt implements InteractiveObject {
         this.updateHitArea();
     }
 
+    // Snap both endpoints back to the nearest tile centers so belts always
+    // live on the same grid as factories.
+    snapToGrid() {
+        const half = this.tileSize / 2;
+
+        const snapPoint = (value: number) => {
+            // Convert from world coordinate back to tile index, assuming
+            // values are meant to be near tile centers.
+            const tile = Math.round((value - half) / this.tileSize);
+            return (tile * this.tileSize) + half;
+        };
+
+        this.x1 = snapPoint(this.x1);
+        this.y1 = snapPoint(this.y1);
+        this.x2 = snapPoint(this.x2);
+        this.y2 = snapPoint(this.y2);
+
+        this.h1.setPosition(this.x1, this.y1);
+        this.h2.setPosition(this.x2, this.y2);
+        this.draw();
+        this.updateHitArea();
+    }
+
     private createHandle(x: number, y: number, id: number) {
         const handle = this.scene.add.circle(x, y, 4, 0xffff00);
         handle.setStrokeStyle(1, 0x000000);
@@ -118,17 +144,64 @@ class Belt implements InteractiveObject {
         handle.setVisible(false);
         handle.setInteractive({ draggable: true });
 
+        // Clicking a handle adjusts which endpoints are considered "selected".
+        // - Without Ctrl: select only this endpoint.
+        // - With Ctrl: toggle this endpoint while leaving the other as-is.
+        handle.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            const isCtrl = (pointer.event as any)?.ctrlKey;
+
+            if (isCtrl) {
+                if (id === 1) this.end1Selected = !this.end1Selected;
+                else this.end2Selected = !this.end2Selected;
+            } else {
+                this.end1Selected = (id === 1);
+                this.end2Selected = (id === 2);
+            }
+
+            // Ensure at least one endpoint remains selected so dragging always
+            // moves something.
+            if (!this.end1Selected && !this.end2Selected) {
+                if (id === 1) this.end1Selected = true; else this.end2Selected = true;
+            }
+
+            this.updateHandleStyles();
+        });
+
         handle.on('drag', (pointer: any, dragX: number, dragY: number) => {
-            // Snap handle to Tile Center
+            // Snap handle (or entire belt) to tile centers based on drag.
             const tileX = Math.floor(dragX / this.tileSize);
             const tileY = Math.floor(dragY / this.tileSize);
             const centerX = (tileX * this.tileSize) + (this.tileSize / 2);
             const centerY = (tileY * this.tileSize) + (this.tileSize / 2);
 
-            handle.setPosition(centerX, centerY);
+            // We support two modes:
+            //  - If BOTH endpoints are selected, dragging either moves the
+            //    entire belt while keeping it aligned to the grid.
+            //  - If only this endpoint is selected, dragging moves just this
+            //    endpoint while the other stays anchored.
+            if (id === 1) {
+                if (this.end1Selected && this.end2Selected) {
+                    const dx = centerX - this.x1;
+                    const dy = centerY - this.y1;
+                    this.x1 += dx; this.y1 += dy;
+                    this.x2 += dx; this.y2 += dy;
+                } else {
+                    this.x1 = centerX; this.y1 = centerY;
+                }
+            } else {
+                if (this.end1Selected && this.end2Selected) {
+                    const dx = centerX - this.x2;
+                    const dy = centerY - this.y2;
+                    this.x1 += dx; this.y1 += dy;
+                    this.x2 += dx; this.y2 += dy;
+                } else {
+                    this.x2 = centerX; this.y2 = centerY;
+                }
+            }
 
-            if (id === 1) { this.x1 = centerX; this.y1 = centerY; }
-            else { this.x2 = centerX; this.y2 = centerY; }
+            // Update handle positions to match the new endpoints.
+            this.h1.setPosition(this.x1, this.y1);
+            this.h2.setPosition(this.x2, this.y2);
 
             this.draw();
             this.updateHitArea();
@@ -139,10 +212,12 @@ class Belt implements InteractiveObject {
     public draw() {
         this.gameObject.clear();
         if (this.isSelected) {
-            this.gameObject.lineStyle(6, 0xffff00, 0.5);
+            // Thicker highlight to make selected belts visually wider
+            this.gameObject.lineStyle(10, 0xffff00, 0.5);
             this.drawPath();
         }
-        this.gameObject.lineStyle(4, 0xaaaaaa, 1);
+        // Base belt width increased for better visibility and click targeting
+        this.gameObject.lineStyle(6, 0xaaaaaa, 1);
         this.drawPath();
     }
 
@@ -155,24 +230,68 @@ class Belt implements InteractiveObject {
     }
 
     private updateHitArea() {
-        const minX = Math.min(this.x1, this.x2) - 8;
-        const maxX = Math.max(this.x1, this.x2) + 8;
-        const minY = Math.min(this.y1, this.y2) - 8;
-        const maxY = Math.max(this.y1, this.y2) + 8;
+        // Use a generous padding so clicking anywhere near the drawn belt selects it.
+        const padding = 12;
+        const minX = Math.min(this.x1, this.x2) - padding;
+        const maxX = Math.max(this.x1, this.x2) + padding;
+        const minY = Math.min(this.y1, this.y2) - padding;
+        const maxY = Math.max(this.y1, this.y2) + padding;
         this.gameObject.setInteractive(new Phaser.Geom.Rectangle(minX, minY, maxX-minX, maxY-minY), Phaser.Geom.Rectangle.Contains);
-        this.scene.input.setDraggable(this.gameObject);
     }
 
     containsPoint(x: number, y: number) {
+        // Treat the belt as an "L"-shaped path made of two thick line segments.
+        // This mirrors how we actually draw the belt, so clicking on the
+        // visible belt behaves like a collision check against those segments.
+
+        const padding = 12; // should roughly match updateHitArea padding
+
         const minX = Math.min(this.x1, this.x2);
         const maxX = Math.max(this.x1, this.x2);
         const minY = Math.min(this.y1, this.y2);
         const maxY = Math.max(this.y1, this.y2);
-        return x >= minX && x <= maxX && y >= minY && y <= maxY;
+
+        // Horizontal segment: from (x1, y1) to (x2, y1)
+        const onHorizontal =
+            x >= minX - padding && x <= maxX + padding &&
+            Math.abs(y - this.y1) <= padding;
+
+        // Vertical segment: from (x2, y1) to (x2, y2)
+        const onVertical =
+            y >= minY - padding && y <= maxY + padding &&
+            Math.abs(x - this.x2) <= padding;
+
+        return onHorizontal || onVertical;
     }
 
-    select() { this.isSelected = true; this.h1.setVisible(true); this.h2.setVisible(true); this.draw(); }
-    deselect() { this.isSelected = false; this.h1.setVisible(false); this.h2.setVisible(false); this.draw(); }
+    // Update handle visuals based on per-endpoint selection state.
+    private updateHandleStyles() {
+        this.h1.setFillStyle(this.end1Selected ? 0xffff00 : 0x888888);
+        this.h2.setFillStyle(this.end2Selected ? 0xffff00 : 0x888888);
+    }
+
+    select() {
+        this.isSelected = true;
+        // When a belt is selected we show both endpoint handles, but leave
+        // their "selected" state empty. The player then clicks a handle to
+        // choose which endpoint to drag; Ctrl+click can enable both ends to
+        // move the entire belt together.
+        this.end1Selected = false;
+        this.end2Selected = false;
+        this.h1.setVisible(true);
+        this.h2.setVisible(true);
+        this.updateHandleStyles();
+        this.draw();
+    }
+
+    deselect() {
+        this.isSelected = false;
+        this.end1Selected = false;
+        this.end2Selected = false;
+        this.h1.setVisible(false);
+        this.h2.setVisible(false);
+        this.draw();
+    }
     destroyObject() { this.h1.destroy(); this.h2.destroy(); this.gameObject.destroy(); }
 }
 
@@ -202,6 +321,11 @@ export class WorkbenchScene extends CoreGameScene {
 
     private entities: InteractiveObject[] = [];
     private uiButtons: Map<string, HTMLElement> = new Map();
+
+    // Drag state managed manually using world coordinates, so we don't rely
+    // on Phaser's internal hit areas (which were previously offset).
+    private isDraggingEntities: boolean = false;
+    private lastDragWorldPos: Phaser.Math.Vector2 = new Phaser.Math.Vector2();
 
     constructor() { super('WorkbenchScene'); }
 
@@ -294,8 +418,16 @@ export class WorkbenchScene extends CoreGameScene {
 
             // 3. Hand Tool (Select / Box / Drag)
             if (this.activeTool === 'HAND') {
-                const hitGameObjects = this.input.hitTestPointer(pointer);
-                const hitEntity = this.entities.find(e => hitGameObjects.includes(e.gameObject));
+                // Collision-style hit test using each entity's geometry
+                // (factories use their footprint, belts their L-shaped path).
+                let hitEntity: InteractiveObject | undefined;
+                for (let i = this.entities.length - 1; i >= 0; i--) {
+                    const e = this.entities[i];
+                    if (e.containsPoint(pointer.worldX, pointer.worldY)) {
+                        hitEntity = e;
+                        break;
+                    }
+                }
 
                 if (hitEntity) {
                     // Entity Clicked
@@ -306,8 +438,59 @@ export class WorkbenchScene extends CoreGameScene {
                             this.selectSingle(hitEntity);
                         }
                     }
+
+                    // Prepare for manual dragging of selected entities.
+                    //
+                    // Factories: always allow whole-entity drag when clicked.
+                    // Belts: allow whole-entity drag only when clicking the
+                    // "middle" of the belt, not near either endpoint. Endpoint
+                    // movement is handled separately via the little handle
+                    // circles on each end.
+                    if (hitEntity instanceof Factory) {
+                        this.isDraggingEntities = true;
+                        this.lastDragWorldPos.set(pointer.worldX, pointer.worldY);
+                    } else if (hitEntity instanceof Belt) {
+                        const belt = hitEntity as Belt;
+
+                        // If the click is very close to an endpoint, we treat
+                        // it as an endpoint interaction (the handle drag code
+                        // will take over) and DO NOT start whole-belt drag
+                        // from the scene.
+                        const distToEnd1 = Phaser.Math.Distance.Between(
+                            pointer.worldX,
+                            pointer.worldY,
+                            belt.x1,
+                            belt.y1
+                        );
+                        const distToEnd2 = Phaser.Math.Distance.Between(
+                            pointer.worldX,
+                            pointer.worldY,
+                            belt.x2,
+                            belt.y2
+                        );
+
+                        // Handle radius is 4px; use a slightly larger
+                        // threshold so that clicks clearly on the handle (or
+                        // very near it) don't initiate whole-belt dragging.
+                        const endpointClickRadius = 10;
+
+                        if (distToEnd1 > endpointClickRadius && distToEnd2 > endpointClickRadius) {
+                            // Clicked in the "middle" of the belt -> enable
+                            // whole-belt drag using the shared entity drag
+                            // logic (moves all selected entities together).
+                            this.isDraggingEntities = true;
+                            this.lastDragWorldPos.set(pointer.worldX, pointer.worldY);
+                        } else {
+                            // Near an endpoint: let the endpoint handle logic
+                            // take care of movement instead.
+                            this.isDraggingEntities = false;
+                        }
+                    } else {
+                        this.isDraggingEntities = false;
+                    }
                 } else {
                     // Empty Space Clicked -> Start Box Select
+                    this.isDraggingEntities = false;
                     this.boxStart = new Phaser.Math.Vector2(pointer.worldX, pointer.worldY);
                 }
             }
@@ -315,6 +498,16 @@ export class WorkbenchScene extends CoreGameScene {
 
         // POINTER MOVE (Box Select Visuals)
         this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+            // Manual drag logic: move all selected entities by world-space delta
+            if (this.isDraggingEntities && pointer.isDown) {
+                const worldDX = pointer.worldX - this.lastDragWorldPos.x;
+                const worldDY = pointer.worldY - this.lastDragWorldPos.y;
+
+                this.selectedEntities.forEach(e => e.moveBy(worldDX, worldDY));
+
+                this.lastDragWorldPos.set(pointer.worldX, pointer.worldY);
+            }
+
             if (this.boxStart) {
                 const w = pointer.worldX - this.boxStart.x;
                 const h = pointer.worldY - this.boxStart.y;
@@ -329,6 +522,20 @@ export class WorkbenchScene extends CoreGameScene {
 
         // POINTER UP (Box Select Logic)
         this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+            // Finish drag, snapping factories back to the grid
+            if (this.isDraggingEntities) {
+                this.isDraggingEntities = false;
+                this.selectedEntities.forEach(e => {
+                    if (e instanceof Factory) {
+                        e.snapToGrid();
+                    } else if (e instanceof Belt) {
+                        // Snap belt endpoints back onto the tile grid so
+                        // belts and factories always share the same grid.
+                        (e as Belt).snapToGrid();
+                    }
+                });
+            }
+
             if (this.boxStart) {
                 // If dragged less than 5px, treat as a "Click on nothing" -> Deselect All
                 if (Phaser.Math.Distance.Between(this.boxStart.x, this.boxStart.y, pointer.worldX, pointer.worldY) < 5) {
@@ -353,34 +560,6 @@ export class WorkbenchScene extends CoreGameScene {
                 this.boxStart = null;
                 this.boxSelectGraphics?.clear();
             }
-        });
-
-        // DRAG (Bulk Move)
-        this.input.on('dragstart', (pointer: any, gameObject: any) => {
-            const entity = this.entities.find(e => e.gameObject === gameObject);
-            // If dragging unselected item, select it first
-            if (entity && !this.selectedEntities.has(entity)) {
-                this.selectSingle(entity);
-            }
-        });
-
-        this.input.on('drag', (pointer: any, gameObject: any, dragX: number, dragY: number) => {
-            const entity = this.entities.find(e => e.gameObject === gameObject);
-            if (entity) {
-                // Calculate World Delta
-                const worldDX = (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom;
-                const worldDY = (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom;
-
-                // Move ALL selected entities
-                this.selectedEntities.forEach(e => e.moveBy(worldDX, worldDY));
-            }
-        });
-
-        this.input.on('dragend', (pointer: any, gameObject: any) => {
-            // Snap factories to grid after drag
-            this.selectedEntities.forEach(e => {
-                if (e instanceof Factory) e.snapToGrid();
-            });
         });
     }
 

@@ -25,7 +25,7 @@ export class DataManager {
 
     // A manual map to define how big machines are on the grid (Width x Height in tiles)
     public machineSizes: Record<string, { w: number, h: number }> = {
-        "Smelter": { w: 2, h: 2 },
+        "Smelter": { w: 1, h: 2 },
         "Constructor": { w: 2, h: 2 },
         "Assembler": { w: 3, h: 3 },
         "Foundry": { w: 3, h: 2 },
