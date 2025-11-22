@@ -2,7 +2,7 @@ const esbuild = require('esbuild')
 const typescript = require('esbuild-plugin-typescript')
 
 esbuild.build({
-    entryPoints: ['app/javascript/simulation/config.ts'],
+    entryPoints: ['app/javascript/simulation/Config.ts'],
     bundle: true,
     outfile: 'app/assets/builds/application.js',
     sourcemap: true,

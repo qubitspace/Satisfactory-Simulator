@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { launchGame } from "../game/config"
+import { launchGame } from "../game/Config"
 
 export default class extends Controller {
     connect() {
