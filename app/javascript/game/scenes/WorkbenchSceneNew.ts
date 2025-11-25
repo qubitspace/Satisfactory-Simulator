@@ -586,8 +586,8 @@ export class WorkbenchSceneNew extends CoreGameScene {
     // ===== TOOL MANAGEMENT =====
 
     private setTool(tool: ToolMode, factoryName?: string) {
-        // Clean up previous tool state
-        this.cancelCurrentAction();
+        // Clean up previous tool state (but don't recursively call setTool)
+        this.cleanupToolState();
 
         this.activeTool = tool;
 
@@ -620,6 +620,13 @@ export class WorkbenchSceneNew extends CoreGameScene {
         this.updateUIButtons();
     }
 
+    private cleanupToolState() {
+        // Clean up visual elements without changing the active tool
+        this.cancelBeltPlacement();
+        this.factoryGhost?.setVisible(false);
+        this.junctionGhost?.setVisible(false);
+    }
+
     private setupFactoryGhost() {
         if (!this.factoryToPlace || !this.ghostGraphics) return;
 
@@ -635,10 +642,8 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private cancelCurrentAction() {
+        // Just switch to hand tool (cleanup happens in setTool)
         this.setTool('HAND');
-        this.cancelBeltPlacement();
-        this.factoryGhost?.setVisible(false);
-        this.junctionGhost?.setVisible(false);
     }
 
     // ===== UI =====
