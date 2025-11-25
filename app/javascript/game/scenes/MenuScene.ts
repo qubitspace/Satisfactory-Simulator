@@ -20,7 +20,7 @@ export class MenuScene extends Phaser.Scene {
         // Button 1: Sandbox
         const sandboxBtn = this.createButton(width / 2, height / 2, 'Start Sandbox', () => {
             // We pass an object defining the mode
-            this.scene.start('WorkbenchScene', {
+            this.scene.start('WorkbenchSceneNew', {
                 mode: 'SANDBOX',
                 levelData: null // Sandbox has no limits/goals
             });
@@ -29,7 +29,7 @@ export class MenuScene extends Phaser.Scene {
         // Button 3: Campaign (Future)
         const campaignBtn = this.createButton(width / 2, height / 2 + 80, 'Start Campaign', () => {
             // We pass different data for the campaign
-            this.scene.start('WorkbenchScene', {
+            this.scene.start('WorkbenchSceneNew', {
                 mode: 'CAMPAIGN',
                 levelData: {
                     id: 'level_01',

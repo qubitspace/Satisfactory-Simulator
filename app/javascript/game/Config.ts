@@ -1,6 +1,6 @@
 import Phaser from "phaser"
 import { MenuScene } from "./scenes/MenuScene"
-import { WorkbenchScene } from "./scenes/WorkbenchScene"
+import { WorkbenchSceneNew } from "./scenes/WorkbenchSceneNew"
 
 export const launchGame = (containerId: string): Phaser.Game => {
     const config: Phaser.Types.Core.GameConfig = {
@@ -14,7 +14,7 @@ export const launchGame = (containerId: string): Phaser.Game => {
             autoCenter: Phaser.Scale.CENTER_BOTH
         },
         // We load our scenes here. The first one in the array starts automatically.
-        scene: [MenuScene, WorkbenchScene],
+        scene: [MenuScene, WorkbenchSceneNew],
         physics: {
             default: 'arcade',
             arcade: {
