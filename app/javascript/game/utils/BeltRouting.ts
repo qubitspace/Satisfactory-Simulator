@@ -63,6 +63,7 @@ export function generate90DegPath(
 /**
  * Route between two points, starting in startDir and ending ready to go in endDir.
  * Creates intermediate waypoints as needed.
+ * Handles U-turns by routing perpendicular first to avoid doubling back.
  */
 function routeBetweenPoints(
     from: Point,
@@ -79,8 +80,36 @@ function routeBetweenPoints(
     const isFromHorizontal = fromDir.x !== 0;
     const isToHorizontal = toDir.x !== 0;
 
-    if (isFromHorizontal === isToHorizontal) {
-        // Same orientation - need 3 segments (turn, straight, turn)
+    // Check for U-turn situation (opposite directions on same axis)
+    const isUTurn = isFromHorizontal === isToHorizontal && (
+        (fromDir.x !== 0 && fromDir.x === -toDir.x) ||
+        (fromDir.y !== 0 && fromDir.y === -toDir.y)
+    );
+
+    if (isUTurn) {
+        // U-turn detected - route perpendicular first to avoid doubling back
+        const clearanceDistance = 60; // Distance to travel perpendicular before turning back
+
+        if (isFromHorizontal) {
+            // Horizontal U-turn: go perpendicular (up or down) first
+            // Choose direction that moves toward the target
+            const perpendicularDir = dy > 0 ? 1 : -1;
+            const midY = from.y + (clearanceDistance * perpendicularDir);
+
+            path.push({ x: from.x, y: midY });  // Turn perpendicular
+            path.push({ x: to.x, y: midY });     // Travel across
+            path.push({ x: to.x, y: to.y });     // Turn back to target
+        } else {
+            // Vertical U-turn: go perpendicular (left or right) first
+            const perpendicularDir = dx > 0 ? 1 : -1;
+            const midX = from.x + (clearanceDistance * perpendicularDir);
+
+            path.push({ x: midX, y: from.y });   // Turn perpendicular
+            path.push({ x: midX, y: to.y });     // Travel across
+            path.push({ x: to.x, y: to.y });     // Turn back to target
+        }
+    } else if (isFromHorizontal === isToHorizontal) {
+        // Same orientation (but not U-turn) - need 3 segments
         if (isFromHorizontal) {
             // Both horizontal: go horizontal, vertical, horizontal
             const midX = from.x + dx / 2;
