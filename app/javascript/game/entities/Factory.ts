@@ -111,48 +111,63 @@ export class Factory extends Phaser.GameObjects.Container implements ConnectionP
     ): void {
         const isVertical = this.gridWidth === 1 && this.gridHeight > 1;  // 1xN (tall)
         const isHorizontal = this.gridHeight === 1 && this.gridWidth > 1; // Nx1 (wide)
-        const isSquare = this.gridWidth === this.gridHeight;
 
         if (isVertical) {
             // 1xN machine: inputs on TOP, outputs on BOTTOM
-            this.createConnectionsOnSide(scene, 'INPUT', 'TOP', inputCount, pixelWidth, 0, -2);
-            this.createConnectionsOnSide(scene, 'OUTPUT', 'BOTTOM', outputCount, pixelWidth, pixelHeight + 2, 0);
+            this.createConnectionsOnSide(scene, 'INPUT', 'TOP', inputCount, pixelWidth, -2);
+            this.createConnectionsOnSide(scene, 'OUTPUT', 'BOTTOM', outputCount, pixelWidth, pixelHeight + 2);
         } else if (isHorizontal) {
             // Nx1 machine: inputs on LEFT, outputs on RIGHT
-            this.createConnectionsOnSide(scene, 'INPUT', 'LEFT', inputCount, 0, -2, pixelHeight);
-            this.createConnectionsOnSide(scene, 'OUTPUT', 'RIGHT', outputCount, pixelWidth + 2, 0, pixelHeight);
+            this.createConnectionsOnSide(scene, 'INPUT', 'LEFT', inputCount, pixelHeight, -2);
+            this.createConnectionsOnSide(scene, 'OUTPUT', 'RIGHT', outputCount, pixelHeight, pixelWidth + 2);
         } else {
             // Square or rectangular: inputs on LEFT, outputs on RIGHT (default)
-            this.createConnectionsOnSide(scene, 'INPUT', 'LEFT', inputCount, 0, -2, pixelHeight);
-            this.createConnectionsOnSide(scene, 'OUTPUT', 'RIGHT', outputCount, pixelWidth + 2, 0, pixelHeight);
+            this.createConnectionsOnSide(scene, 'INPUT', 'LEFT', inputCount, pixelHeight, -2);
+            this.createConnectionsOnSide(scene, 'OUTPUT', 'RIGHT', outputCount, pixelHeight, pixelWidth + 2);
         }
     }
 
     /**
      * Helper to create connection points along a specific side
+     * @param sideLength - Length of the side to distribute points along
+     * @param perpendicularOffset - Offset perpendicular to the side (negative = outside machine)
      */
     private createConnectionsOnSide(
         scene: Phaser.Scene,
         type: ConnectionType,
         side: ConnectionSide,
         count: number,
-        baseX: number,
-        offsetX: number,
-        sideLength: number
+        sideLength: number,
+        perpendicularOffset: number
     ): void {
         const isHorizontalSide = side === 'TOP' || side === 'BOTTOM';
 
         for (let i = 0; i < count; i++) {
+            // Distribute evenly along the side
             const spacing = sideLength / (count + 1);
             const position = spacing * (i + 1) - sideLength / 2;
+
+            // Calculate offsets based on side orientation
+            let offsetX: number;
+            let offsetY: number;
+
+            if (isHorizontalSide) {
+                // TOP or BOTTOM: distribute along X, offset in Y
+                offsetX = position;
+                offsetY = perpendicularOffset;
+            } else {
+                // LEFT or RIGHT: distribute along Y, offset in X
+                offsetX = perpendicularOffset;
+                offsetY = position;
+            }
 
             const point = new ConnectionPoint(
                 scene,
                 this,
                 type,
                 side,
-                isHorizontalSide ? position : offsetX,
-                isHorizontalSide ? offsetX : position
+                offsetX,
+                offsetY
             );
 
             if (type === 'INPUT') {
