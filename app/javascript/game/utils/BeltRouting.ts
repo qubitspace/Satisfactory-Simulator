@@ -1,6 +1,6 @@
 /**
- * Simple orthogonal routing for belts.
- * Creates clean L-shaped or Z-shaped paths between two points.
+ * Advanced orthogonal routing for belts with 90° entry/exit requirement.
+ * Belts must enter and exit connection points perpendicular to the surface.
  */
 
 export interface Point {
@@ -8,9 +8,141 @@ export interface Point {
     y: number;
 }
 
+export interface Direction {
+    x: number;  // -1, 0, or 1
+    y: number;  // -1, 0, or 1
+}
+
 /**
- * Generate a simple orthogonal path between two points.
- * Uses L-shape (2 segments) or Z-shape (3 segments) routing.
+ * Generate a path that exits start point at 90° and enters end point at 90°.
+ * The path will have multiple segments to accommodate this requirement.
+ *
+ * @param start - Starting point coordinates
+ * @param end - Ending point coordinates
+ * @param startDir - Direction to exit from start (perpendicular to connection surface)
+ * @param endDir - Direction to enter end (perpendicular to connection surface)
+ * @param minStraight - Minimum distance to travel straight out/in (default: 20px)
+ */
+export function generate90DegPath(
+    start: Point,
+    end: Point,
+    startDir: Direction,
+    endDir: Direction,
+    minStraight: number = 20
+): Point[] {
+    const path: Point[] = [];
+
+    // Start point
+    path.push({ x: start.x, y: start.y });
+
+    // Exit point: go straight out from start in startDir
+    const exitPoint = {
+        x: start.x + startDir.x * minStraight,
+        y: start.y + startDir.y * minStraight
+    };
+    path.push(exitPoint);
+
+    // Entry point: go straight into end from endDir
+    // Note: endDir points INTO the connection, so we go opposite direction
+    const entryPoint = {
+        x: end.x - endDir.x * minStraight,
+        y: end.y - endDir.y * minStraight
+    };
+
+    // Now route between exitPoint and entryPoint
+    // We need to maintain the direction we're traveling
+    const midPath = routeBetweenPoints(exitPoint, entryPoint, startDir, endDir);
+    path.push(...midPath);
+
+    // Final entry into the end point
+    path.push({ x: end.x, y: end.y });
+
+    return path;
+}
+
+/**
+ * Route between two points, starting in startDir and ending ready to go in endDir.
+ * Creates intermediate waypoints as needed.
+ */
+function routeBetweenPoints(
+    from: Point,
+    to: Point,
+    fromDir: Direction,
+    toDir: Direction
+): Point[] {
+    const path: Point[] = [];
+
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+
+    // Determine if we're traveling horizontally or vertically from 'from'
+    const isFromHorizontal = fromDir.x !== 0;
+    const isToHorizontal = toDir.x !== 0;
+
+    if (isFromHorizontal === isToHorizontal) {
+        // Same orientation - need 3 segments (turn, straight, turn)
+        if (isFromHorizontal) {
+            // Both horizontal: go horizontal, vertical, horizontal
+            const midX = from.x + dx / 2;
+            path.push({ x: midX, y: from.y });
+            path.push({ x: midX, y: to.y });
+        } else {
+            // Both vertical: go vertical, horizontal, vertical
+            const midY = from.y + dy / 2;
+            path.push({ x: from.x, y: midY });
+            path.push({ x: to.x, y: midY });
+        }
+    } else {
+        // Different orientation - need 1 turn
+        if (isFromHorizontal) {
+            // From horizontal to vertical: turn at corner
+            path.push({ x: to.x, y: from.y });
+        } else {
+            // From vertical to horizontal: turn at corner
+            path.push({ x: from.x, y: to.y });
+        }
+    }
+
+    return path;
+}
+
+/**
+ * Automatically choose best routing strategy based on positions and directions.
+ * Enforces 90° entry/exit angles.
+ */
+export function generateSmartPath(
+    start: Point,
+    end: Point,
+    startDirection?: Direction,
+    endDirection?: Direction
+): Point[] {
+    // If we have direction info, use the 90° routing
+    if (startDirection && endDirection) {
+        return generate90DegPath(start, end, startDirection, endDirection);
+    }
+
+    // Fallback to simple routing if no direction info
+    // (This shouldn't happen with our connection point system)
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+
+    const path: Point[] = [{ x: start.x, y: start.y }];
+
+    if (Math.abs(dx) > Math.abs(dy)) {
+        // Horizontal first
+        if (dx !== 0) path.push({ x: end.x, y: start.y });
+        path.push({ x: end.x, y: end.y });
+    } else {
+        // Vertical first
+        if (dy !== 0) path.push({ x: start.x, y: end.y });
+        path.push({ x: end.x, y: end.y });
+    }
+
+    return path;
+}
+
+/**
+ * Legacy function - kept for backwards compatibility
  */
 export function generateOrthogonalPath(
     start: Point,
@@ -18,21 +150,17 @@ export function generateOrthogonalPath(
     preferHorizontalFirst: boolean = true
 ): Point[] {
     const path: Point[] = [];
-
     path.push({ x: start.x, y: start.y });
 
     const dx = end.x - start.x;
     const dy = end.y - start.y;
 
-    // Simple L-shape: horizontal then vertical, or vertical then horizontal
     if (preferHorizontalFirst) {
-        // Go horizontal first, then vertical
         if (Math.abs(dx) > 0) {
             path.push({ x: end.x, y: start.y });
         }
         path.push({ x: end.x, y: end.y });
     } else {
-        // Go vertical first, then horizontal
         if (Math.abs(dy) > 0) {
             path.push({ x: start.x, y: end.y });
         }
@@ -40,70 +168,4 @@ export function generateOrthogonalPath(
     }
 
     return path;
-}
-
-/**
- * Generate a Z-shaped path with a middle segment.
- * Useful for more complex routing.
- */
-export function generateZPath(
-    start: Point,
-    end: Point,
-    horizontal: boolean = true
-): Point[] {
-    const path: Point[] = [];
-
-    path.push({ x: start.x, y: start.y });
-
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-
-    if (horizontal) {
-        // Horizontal-Vertical-Horizontal (Z-shape rotated)
-        const midX = start.x + dx / 2;
-        path.push({ x: midX, y: start.y });
-        path.push({ x: midX, y: end.y });
-        path.push({ x: end.x, y: end.y });
-    } else {
-        // Vertical-Horizontal-Vertical (Z-shape)
-        const midY = start.y + dy / 2;
-        path.push({ x: start.x, y: midY });
-        path.push({ x: end.x, y: midY });
-        path.push({ x: end.x, y: end.y });
-    }
-
-    return path;
-}
-
-/**
- * Automatically choose best routing strategy based on positions.
- * Tries to route away from the connection point direction.
- */
-export function generateSmartPath(
-    start: Point,
-    end: Point,
-    startDirection?: { x: number; y: number },
-    endDirection?: { x: number; y: number }
-): Point[] {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-
-    // If we have direction info, use it to determine routing preference
-    if (startDirection) {
-        // Start by going in the direction of the output
-        if (Math.abs(startDirection.x) > Math.abs(startDirection.y)) {
-            // Prefer horizontal first
-            return generateOrthogonalPath(start, end, true);
-        } else {
-            // Prefer vertical first
-            return generateOrthogonalPath(start, end, false);
-        }
-    }
-
-    // Default: choose based on which distance is larger
-    if (Math.abs(dx) > Math.abs(dy)) {
-        return generateOrthogonalPath(start, end, true);
-    } else {
-        return generateOrthogonalPath(start, end, false);
-    }
 }

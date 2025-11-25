@@ -207,17 +207,31 @@ export class ConnectionPoint {
     }
 
     /**
-     * Get direction vector pointing away from the connection point
-     * (useful for belt routing)
+     * Get direction vector for belt routing.
+     * Represents the direction the belt travels as it passes through this connection.
+     * - For OUTPUTs: direction belt exits (away from machine)
+     * - For INPUTs: direction belt enters (into machine from outside)
      */
     public getDirectionVector(): { x: number, y: number } {
         const isInput = this.type === 'INPUT';
 
         switch (this.side) {
-            case 'TOP': return { x: 0, y: isInput ? -1 : 1 };
-            case 'RIGHT': return { x: isInput ? 1 : -1, y: 0 };
-            case 'BOTTOM': return { x: 0, y: isInput ? 1 : -1 };
-            case 'LEFT': return { x: isInput ? -1 : 1, y: 0 };
+            case 'TOP':
+                // Input on top: belt enters from above going down
+                // Output on top: belt exits going up
+                return { x: 0, y: isInput ? 1 : -1 };
+            case 'RIGHT':
+                // Input on right: belt enters from right going left
+                // Output on right: belt exits going right
+                return { x: isInput ? -1 : 1, y: 0 };
+            case 'BOTTOM':
+                // Input on bottom: belt enters from below going up
+                // Output on bottom: belt exits going down
+                return { x: 0, y: isInput ? -1 : 1 };
+            case 'LEFT':
+                // Input on left: belt enters from left going right
+                // Output on left: belt exits going left
+                return { x: isInput ? 1 : -1, y: 0 };
         }
     }
 }

@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ConnectionPoint, ConnectionPointOwner, ConnectionType } from "./ConnectionPoint";
+import { ConnectionPoint, ConnectionPointOwner, ConnectionType, ConnectionSide } from "./ConnectionPoint";
 
 /**
  * Represents a factory building with inputs and outputs.
@@ -96,7 +96,11 @@ export class Factory extends Phaser.GameObjects.Container implements ConnectionP
     }
 
     /**
-     * Creates input and output connection points distributed around the factory edges
+     * Creates input and output connection points distributed intelligently around factory edges.
+     * Rules:
+     * - 1xN machines: inputs on top short side, outputs on bottom short side
+     * - Nx1 machines: inputs on left short side, outputs on right short side
+     * - Square/rectangular (2x2+): inputs on left long side, outputs on right long side
      */
     private createConnectionPoints(
         scene: Phaser.Scene,
@@ -105,38 +109,57 @@ export class Factory extends Phaser.GameObjects.Container implements ConnectionP
         pixelWidth: number,
         pixelHeight: number
     ): void {
-        // Inputs on the LEFT side
-        for (let i = 0; i < inputCount; i++) {
-            const spacing = pixelHeight / (inputCount + 1);
-            const offsetY = spacing * (i + 1) - pixelHeight / 2;
+        const isVertical = this.gridWidth === 1 && this.gridHeight > 1;  // 1xN (tall)
+        const isHorizontal = this.gridHeight === 1 && this.gridWidth > 1; // Nx1 (wide)
+        const isSquare = this.gridWidth === this.gridHeight;
 
-            const point = new ConnectionPoint(
-                scene,
-                this,
-                'INPUT',
-                'LEFT',
-                -2, // Slightly outside the factory edge
-                offsetY
-            );
-
-            this.inputs.push(point);
+        if (isVertical) {
+            // 1xN machine: inputs on TOP, outputs on BOTTOM
+            this.createConnectionsOnSide(scene, 'INPUT', 'TOP', inputCount, pixelWidth, 0, -2);
+            this.createConnectionsOnSide(scene, 'OUTPUT', 'BOTTOM', outputCount, pixelWidth, pixelHeight + 2, 0);
+        } else if (isHorizontal) {
+            // Nx1 machine: inputs on LEFT, outputs on RIGHT
+            this.createConnectionsOnSide(scene, 'INPUT', 'LEFT', inputCount, 0, -2, pixelHeight);
+            this.createConnectionsOnSide(scene, 'OUTPUT', 'RIGHT', outputCount, pixelWidth + 2, 0, pixelHeight);
+        } else {
+            // Square or rectangular: inputs on LEFT, outputs on RIGHT (default)
+            this.createConnectionsOnSide(scene, 'INPUT', 'LEFT', inputCount, 0, -2, pixelHeight);
+            this.createConnectionsOnSide(scene, 'OUTPUT', 'RIGHT', outputCount, pixelWidth + 2, 0, pixelHeight);
         }
+    }
 
-        // Outputs on the RIGHT side
-        for (let i = 0; i < outputCount; i++) {
-            const spacing = pixelHeight / (outputCount + 1);
-            const offsetY = spacing * (i + 1) - pixelHeight / 2;
+    /**
+     * Helper to create connection points along a specific side
+     */
+    private createConnectionsOnSide(
+        scene: Phaser.Scene,
+        type: ConnectionType,
+        side: ConnectionSide,
+        count: number,
+        baseX: number,
+        offsetX: number,
+        sideLength: number
+    ): void {
+        const isHorizontalSide = side === 'TOP' || side === 'BOTTOM';
+
+        for (let i = 0; i < count; i++) {
+            const spacing = sideLength / (count + 1);
+            const position = spacing * (i + 1) - sideLength / 2;
 
             const point = new ConnectionPoint(
                 scene,
                 this,
-                'OUTPUT',
-                'RIGHT',
-                pixelWidth + 2, // Slightly outside the factory edge
-                offsetY
+                type,
+                side,
+                isHorizontalSide ? position : offsetX,
+                isHorizontalSide ? offsetX : position
             );
 
-            this.outputs.push(point);
+            if (type === 'INPUT') {
+                this.inputs.push(point);
+            } else {
+                this.outputs.push(point);
+            }
         }
     }
 
