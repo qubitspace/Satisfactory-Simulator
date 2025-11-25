@@ -74,6 +74,9 @@ export class WorkbenchSceneNew extends CoreGameScene {
 
         // Start with hand tool
         this.setTool('HAND');
+
+        // Load test scene for development
+        this.loadTestScene();
     }
 
     override update(time: number, delta: number) {
@@ -749,5 +752,81 @@ export class WorkbenchSceneNew extends CoreGameScene {
                 btn.style.borderColor = '#444';
             }
         });
+    }
+
+    // ===== TEST SCENE LOADER =====
+
+    /**
+     * Load a test scene with pre-placed factories and belts for development.
+     * Comment out the call in create() to disable.
+     */
+    private loadTestScene() {
+        // Calculate center of map
+        const centerX = (this.MAP_WIDTH_TILES * this.TILE_SIZE) / 2;
+        const centerY = (this.MAP_HEIGHT_TILES * this.TILE_SIZE) / 2;
+
+        // Create a vertical chain: Smelter -> Smelter -> Constructor
+        const smelter1 = new Factory(
+            this,
+            centerX - 100,
+            centerY - 200,
+            'Smelter',
+            1, 2,
+            this.TILE_SIZE,
+            2, 1
+        );
+        this.factories.push(smelter1);
+
+        const smelter2 = new Factory(
+            this,
+            centerX - 100,
+            centerY,
+            'Smelter',
+            1, 2,
+            this.TILE_SIZE,
+            2, 1
+        );
+        this.factories.push(smelter2);
+
+        const constructor1 = new Factory(
+            this,
+            centerX + 100,
+            centerY,
+            'Constructor',
+            2, 2,
+            this.TILE_SIZE,
+            2, 1
+        );
+        this.factories.push(constructor1);
+
+        // Create a junction for testing
+        const junction1 = new Junction(
+            this,
+            centerX + 16,
+            centerY - 100,
+            this.TILE_SIZE
+        );
+        this.junctions.push(junction1);
+
+        // Connect them with belts
+        // Smelter1 output -> Smelter2 input
+        if (smelter1.outputs[0] && smelter2.inputs[0]) {
+            const belt1 = new Belt(this, smelter1.outputs[0], smelter2.inputs[0], 0);
+            this.belts.push(belt1);
+        }
+
+        // Smelter2 output -> Constructor input
+        if (smelter2.outputs[0] && constructor1.inputs[0]) {
+            const belt2 = new Belt(this, smelter2.outputs[0], constructor1.inputs[0], 0);
+            this.belts.push(belt2);
+        }
+
+        // Smelter1 second input -> Junction (for testing complex routing)
+        if (smelter1.inputs[1] && junction1.connectionPoints.get('RIGHT')) {
+            const belt3 = new Belt(this, junction1.connectionPoints.get('RIGHT')!, smelter1.inputs[1], 0);
+            this.belts.push(belt3);
+        }
+
+        console.log('Test scene loaded: 3 factories, 1 junction, 3 belts');
     }
 }
