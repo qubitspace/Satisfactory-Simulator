@@ -97,33 +97,53 @@ function routeBetweenPoints(
 
         if (isFromHorizontal) {
             // Horizontal movement: go perpendicular (up or down) first
-            // Choose direction based on where target is, or away from origin if aligned
+            // Choose direction that moves TOWARD the target to avoid reversals
             let perpendicularDir: number;
             if (Math.abs(dy) > 5) {
+                // Target is significantly above or below - go toward it
                 perpendicularDir = dy > 0 ? 1 : -1;
             } else {
-                // If horizontally aligned, pick the direction that moves away
-                perpendicularDir = fromDir.x > 0 ? -1 : 1;
+                // Horizontally aligned - choose based on which way we're going
+                // If going right, go down. If going left, go up.
+                perpendicularDir = fromDir.x > 0 ? 1 : -1;
             }
-            const midY = from.y + (clearanceDistance * perpendicularDir);
 
-            path.push({ x: from.x, y: midY });  // Turn perpendicular
-            path.push({ x: to.x, y: midY });     // Travel across
-            path.push({ x: to.x, y: to.y });     // Turn to entry point
+            // Calculate midpoint - ensure we go far enough in perpendicular direction
+            // to have room for the horizontal travel
+            const minClearance = Math.max(clearanceDistance, Math.abs(dx) * 0.5);
+            const midY = from.y + (minClearance * perpendicularDir);
+
+            path.push({ x: from.x, y: midY });  // Turn perpendicular (90°)
+            path.push({ x: to.x, y: midY });     // Travel across horizontally
+
+            // Only add final turn if we're not already at the target Y
+            // This prevents a potential reversal
+            if (Math.abs(midY - to.y) > 5) {
+                path.push({ x: to.x, y: to.y });     // Turn to entry point (90°)
+            }
         } else {
             // Vertical movement: go perpendicular (left or right) first
             let perpendicularDir: number;
             if (Math.abs(dx) > 5) {
+                // Target is significantly left or right - go toward it
                 perpendicularDir = dx > 0 ? 1 : -1;
             } else {
-                // If vertically aligned, pick the direction that moves away
-                perpendicularDir = fromDir.y > 0 ? -1 : 1;
+                // Vertically aligned - choose based on which way we're going
+                // If going down, go right. If going up, go left.
+                perpendicularDir = fromDir.y > 0 ? 1 : -1;
             }
-            const midX = from.x + (clearanceDistance * perpendicularDir);
 
-            path.push({ x: midX, y: from.y });   // Turn perpendicular
-            path.push({ x: midX, y: to.y });     // Travel across
-            path.push({ x: to.x, y: to.y });     // Turn to entry point
+            // Calculate midpoint with sufficient clearance
+            const minClearance = Math.max(clearanceDistance, Math.abs(dy) * 0.5);
+            const midX = from.x + (minClearance * perpendicularDir);
+
+            path.push({ x: midX, y: from.y });   // Turn perpendicular (90°)
+            path.push({ x: midX, y: to.y });     // Travel across vertically
+
+            // Only add final turn if needed
+            if (Math.abs(midX - to.x) > 5) {
+                path.push({ x: to.x, y: to.y });     // Turn to entry point (90°)
+            }
         }
     } else if (isFromHorizontal === isToHorizontal) {
         // Same orientation (but not U-turn) - need 3 segments
