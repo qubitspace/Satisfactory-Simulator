@@ -145,7 +145,7 @@ export class Factory extends Phaser.GameObjects.Container implements ConnectionP
         for (let i = 0; i < count; i++) {
             // Distribute evenly along the side
             const spacing = sideLength / (count + 1);
-            const position = spacing * (i + 1) - sideLength / 2;
+            const position = spacing * (i + 1);
 
             // Calculate offsets based on side orientation
             let offsetX: number;

@@ -773,7 +773,7 @@ export class WorkbenchSceneNew extends CoreGameScene {
             'Smelter',
             1, 2,
             this.TILE_SIZE,
-            2, 1
+            2, 1  // 2 inputs, 1 output
         );
         this.factories.push(smelter1);
 
@@ -784,7 +784,7 @@ export class WorkbenchSceneNew extends CoreGameScene {
             'Smelter',
             1, 2,
             this.TILE_SIZE,
-            2, 1
+            2, 1  // 2 inputs, 1 output
         );
         this.factories.push(smelter2);
 
@@ -795,7 +795,7 @@ export class WorkbenchSceneNew extends CoreGameScene {
             'Constructor',
             2, 2,
             this.TILE_SIZE,
-            2, 1
+            1, 1  // 1 input, 1 output (was 2, 1)
         );
         this.factories.push(constructor1);
 
