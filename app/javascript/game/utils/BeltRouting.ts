@@ -109,6 +109,7 @@ function routeBetweenPoints(
 
             path.push({ x: from.x, y: midY });  // Turn perpendicular
             path.push({ x: to.x, y: midY });     // Travel across
+            path.push({ x: to.x, y: to.y });     // Turn to entry point
         } else {
             // Vertical movement: go perpendicular (left or right) first
             let perpendicularDir: number;
@@ -122,6 +123,7 @@ function routeBetweenPoints(
 
             path.push({ x: midX, y: from.y });   // Turn perpendicular
             path.push({ x: midX, y: to.y });     // Travel across
+            path.push({ x: to.x, y: to.y });     // Turn to entry point
         }
     } else if (isFromHorizontal === isToHorizontal) {
         // Same orientation (but not U-turn) - need 3 segments
