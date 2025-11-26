@@ -580,10 +580,10 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private updateConnectedBelts() {
-        // Belts automatically update when their connection points move
-        // (they read from connection point positions when drawing)
-        // So we just need to trigger a redraw
-        // This is handled in the Belt class already
+        // Update all belts to redraw with new connection point positions
+        this.belts.forEach(belt => {
+            belt.updatePath();
+        });
     }
 
     // ===== TOOL MANAGEMENT =====

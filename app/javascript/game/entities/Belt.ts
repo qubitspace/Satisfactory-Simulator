@@ -57,9 +57,10 @@ export class Belt {
     }
 
     /**
-     * Generate routing path between connection points
+     * Generate routing path between connection points.
+     * Call this when connection points move to update the belt path.
      */
-    private updatePath(): void {
+    public updatePath(): void {
         const start = { x: this.startPoint.x, y: this.startPoint.y };
         const end = { x: this.endPoint.x, y: this.endPoint.y };
 
@@ -69,6 +70,7 @@ export class Belt {
         this.path = generateSmartPath(start, end, startDir, endDir);
 
         this.draw();
+        this.updateHitArea();
     }
 
     /**
