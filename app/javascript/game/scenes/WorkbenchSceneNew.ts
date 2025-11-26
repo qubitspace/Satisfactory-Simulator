@@ -105,6 +105,12 @@ export class WorkbenchSceneNew extends CoreGameScene {
 
         // Update connection point hover states
         this.updateConnectionPointHovers(pointer.worldX, pointer.worldY);
+
+        // Update cursor for hand tool (show 'move' when hovering entities)
+        if (this.activeTool === 'HAND' && !this.isDragging) {
+            const entity = this.findEntityAt(pointer.worldX, pointer.worldY);
+            this.game.canvas.style.cursor = entity ? 'move' : 'default';
+        }
     }
 
     // ===== HELPERS =====
@@ -712,6 +718,32 @@ export class WorkbenchSceneNew extends CoreGameScene {
         }
 
         this.updateUIButtons();
+        this.updateCursor();
+    }
+
+    /**
+     * Update cursor based on active tool
+     */
+    private updateCursor() {
+        const canvas = this.game.canvas;
+
+        switch (this.activeTool) {
+            case 'HAND':
+                canvas.style.cursor = 'default';
+                break;
+            case 'FACTORY':
+            case 'JUNCTION':
+                canvas.style.cursor = 'crosshair';
+                break;
+            case 'BELT':
+                canvas.style.cursor = 'cell';
+                break;
+            case 'DELETE':
+                canvas.style.cursor = 'not-allowed';
+                break;
+            default:
+                canvas.style.cursor = 'default';
+        }
     }
 
     private cleanupToolState() {
