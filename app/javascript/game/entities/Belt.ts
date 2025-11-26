@@ -1,21 +1,28 @@
 import Phaser from "phaser";
 import { ConnectionPoint } from "./ConnectionPoint";
+import { BeltEndpoint } from "./BeltEndpoint";
 import { generateSmartPath, Point } from "../utils/BeltRouting";
 
 /**
+ * BeltConnection can be either a factory/junction ConnectionPoint or a free-standing BeltEndpoint
+ */
+export type BeltConnection = ConnectionPoint | BeltEndpoint;
+
+/**
  * Represents a belt connection between two connection points.
+ * Can connect to factory/junction ConnectionPoints or free-standing BeltEndpoints.
  * Automatically routes using orthogonal pathfinding.
  */
 export class Belt {
-    public readonly startPoint: ConnectionPoint;
-    public readonly endPoint: ConnectionPoint;
+    public readonly startPoint: BeltConnection;
+    public readonly endPoint: BeltConnection;
 
     // Visual elements
     private graphics: Phaser.GameObjects.Graphics;
     private hitArea: Phaser.GameObjects.Graphics;
 
     // Path waypoints
-    private path: Point[] = [];
+    public path: Point[] = [];
 
     // Belt properties
     public layer: number = 0; // For crossing belts at different heights (0, 1, 2)
@@ -28,8 +35,8 @@ export class Belt {
 
     constructor(
         scene: Phaser.Scene,
-        startPoint: ConnectionPoint,
-        endPoint: ConnectionPoint,
+        startPoint: BeltConnection,
+        endPoint: BeltConnection,
         layer: number = 0
     ) {
         this.scene = scene;

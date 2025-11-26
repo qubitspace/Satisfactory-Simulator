@@ -182,8 +182,12 @@ export function generateSmartPath(
     startDirection?: Direction,
     endDirection?: Direction
 ): Point[] {
-    // If we have direction info, use the 90° routing
-    if (startDirection && endDirection) {
+    // Check if we have valid direction info (non-zero vectors)
+    const hasValidStartDir = startDirection && (startDirection.x !== 0 || startDirection.y !== 0);
+    const hasValidEndDir = endDirection && (endDirection.x !== 0 || endDirection.y !== 0);
+
+    // If we have valid direction info, use the 90° routing
+    if (hasValidStartDir && hasValidEndDir) {
         return generate90DegPath(start, end, startDirection, endDirection);
     }
 

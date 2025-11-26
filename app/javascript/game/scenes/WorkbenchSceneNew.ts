@@ -5,6 +5,7 @@ import { Factory } from "../entities/Factory";
 import { Junction } from "../entities/Junction";
 import { Belt } from "../entities/Belt";
 import { ConnectionPoint } from "../entities/ConnectionPoint";
+import { BeltEndpoint } from "../entities/BeltEndpoint";
 
 type ToolMode = 'HAND' | 'FACTORY' | 'JUNCTION' | 'BELT' | 'DELETE';
 
@@ -29,8 +30,9 @@ export class WorkbenchSceneNew extends CoreGameScene {
     private hoveredConnectionPoint: ConnectionPoint | null = null;
 
     // Belt placement state
-    private beltStartPoint: ConnectionPoint | null = null;
+    private beltStartPoint: ConnectionPoint | BeltEndpoint | null = null;
     private beltPreview: Phaser.GameObjects.Graphics | null = null;
+    private beltEndpoints: BeltEndpoint[] = []; // Track all belt endpoints
 
     // Factory placement ghost
     private factoryGhost: Phaser.GameObjects.Container | null = null;
@@ -42,6 +44,7 @@ export class WorkbenchSceneNew extends CoreGameScene {
     // Dragging state
     private isDragging: boolean = false;
     private dragStart: Phaser.Math.Vector2 = new Phaser.Math.Vector2();
+    private draggedBeltEndpoint: BeltEndpoint | null = null;
 
     // UI
     private uiContainer: HTMLElement | null = null;
@@ -182,17 +185,23 @@ export class WorkbenchSceneNew extends CoreGameScene {
     private onPointerMove(pointer: Phaser.Input.Pointer) {
         // Handle dragging
         if (this.isDragging && pointer.isDown) {
-            const dx = pointer.worldX - this.dragStart.x;
-            const dy = pointer.worldY - this.dragStart.y;
+            if (this.draggedBeltEndpoint) {
+                // Dragging a belt endpoint
+                this.draggedBeltEndpoint.updateDragPosition(pointer.worldX, pointer.worldY);
+            } else {
+                // Dragging entities
+                const dx = pointer.worldX - this.dragStart.x;
+                const dy = pointer.worldY - this.dragStart.y;
 
-            this.selectedEntities.forEach(entity => {
-                entity.moveBy(dx, dy);
-            });
+                this.selectedEntities.forEach(entity => {
+                    entity.moveBy(dx, dy);
+                });
 
-            this.dragStart.set(pointer.worldX, pointer.worldY);
+                this.dragStart.set(pointer.worldX, pointer.worldY);
 
-            // Update connected belts
-            this.updateConnectedBelts();
+                // Update connected belts
+                this.updateConnectedBelts();
+            }
         }
 
         // Handle box selection visual
@@ -213,12 +222,19 @@ export class WorkbenchSceneNew extends CoreGameScene {
         if (this.isDragging) {
             this.isDragging = false;
 
-            // Snap to grid
-            this.selectedEntities.forEach(entity => {
-                entity.snapToGrid();
-            });
+            if (this.draggedBeltEndpoint) {
+                // End belt endpoint drag
+                this.draggedBeltEndpoint.endDrag();
+                this.draggedBeltEndpoint = null;
+            } else {
+                // End entity drag
+                // Snap to grid
+                this.selectedEntities.forEach(entity => {
+                    entity.snapToGrid();
+                });
 
-            this.updateConnectedBelts();
+                this.updateConnectedBelts();
+            }
         }
 
         // End box selection
@@ -276,6 +292,15 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private handleJunctionPlacement(pointer: Phaser.Input.Pointer) {
+        // Check if user clicked on a BeltEndpoint
+        const clickedEndpoint = this.findBeltEndpointAt(pointer.worldX, pointer.worldY);
+
+        if (clickedEndpoint) {
+            // Replace belt endpoint with junction
+            this.replaceBeltEndpointWithJunction(clickedEndpoint);
+            return;
+        }
+
         // Check if user clicked on an existing belt
         const clickedBelt = this.findBeltAt(pointer.worldX, pointer.worldY);
 
@@ -299,44 +324,72 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private handleBeltClick(pointer: Phaser.Input.Pointer) {
-        // Find connection point at click position
+        // Find what was clicked (ConnectionPoint, BeltEndpoint, or empty space)
         const connectionPoint = this.findConnectionPointAt(pointer.worldX, pointer.worldY);
+        const beltEndpoint = this.findBeltEndpointAt(pointer.worldX, pointer.worldY);
 
-        if (!connectionPoint) {
-            // Clicked empty space, cancel belt placement
-            this.cancelBeltPlacement();
-            return;
-        }
+        // Determine the target point
+        let targetPoint: ConnectionPoint | BeltEndpoint | null = connectionPoint || beltEndpoint;
 
         if (!this.beltStartPoint) {
             // First click - start belt placement
-            if (!connectionPoint.isAvailable()) {
-                // Connection point already used
-                return;
+            if (connectionPoint) {
+                // Start from a connection point
+                if (!connectionPoint.isAvailable()) {
+                    return; // Already connected
+                }
+                this.beltStartPoint = connectionPoint;
+                if ('setHovered' in connectionPoint) {
+                    connectionPoint.setHovered(true);
+                }
+            } else if (beltEndpoint) {
+                // Start from an existing belt endpoint
+                this.beltStartPoint = beltEndpoint;
+            } else {
+                // Start in empty space - create a new BeltEndpoint
+                const newEndpoint = new BeltEndpoint(this, pointer.worldX, pointer.worldY);
+                this.beltEndpoints.push(newEndpoint);
+                this.beltStartPoint = newEndpoint;
             }
-
-            this.beltStartPoint = connectionPoint;
-            this.beltStartPoint.setHovered(true);
         } else {
-            // Second click - complete belt placement
-            if (connectionPoint === this.beltStartPoint) {
-                // Clicked same point, cancel
-                this.cancelBeltPlacement();
-                return;
+            // Continue belt chain - create segment
+            let endPoint: ConnectionPoint | BeltEndpoint;
+
+            if (connectionPoint) {
+                // Connecting to a connection point
+                if (!connectionPoint.isAvailable()) {
+                    return; // Already connected
+                }
+                // Check compatibility if starting from ConnectionPoint
+                if (this.beltStartPoint instanceof ConnectionPoint &&
+                    !this.beltStartPoint.canConnectTo(connectionPoint)) {
+                    return; // Invalid connection
+                }
+                endPoint = connectionPoint;
+            } else if (beltEndpoint && beltEndpoint !== this.beltStartPoint) {
+                // Connecting to an existing belt endpoint
+                endPoint = beltEndpoint;
+            } else {
+                // Create new BeltEndpoint in empty space
+                const newEndpoint = new BeltEndpoint(this, pointer.worldX, pointer.worldY);
+                this.beltEndpoints.push(newEndpoint);
+                endPoint = newEndpoint;
             }
 
-            if (!this.beltStartPoint.canConnectTo(connectionPoint)) {
-                // Invalid connection
-                this.cancelBeltPlacement();
-                return;
-            }
-
-            // Create the belt!
-            const belt = new Belt(this, this.beltStartPoint, connectionPoint, 0);
+            // Create the belt segment!
+            const belt = new Belt(this, this.beltStartPoint, endPoint, 0);
             this.belts.push(belt);
 
-            // Clear belt placement state
-            this.cancelBeltPlacement();
+            // Clear start hover state
+            if (this.beltStartPoint instanceof ConnectionPoint && 'setHovered' in this.beltStartPoint) {
+                this.beltStartPoint.setHovered(false);
+            }
+
+            // Continue from this endpoint for next segment
+            this.beltStartPoint = endPoint;
+            if (endPoint instanceof ConnectionPoint && 'setHovered' in endPoint) {
+                endPoint.setHovered(true);
+            }
         }
     }
 
@@ -357,6 +410,18 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private handleHandClick(pointer: Phaser.Input.Pointer) {
+        // Check for BeltEndpoint click first (they're small and should take priority)
+        const beltEndpoint = this.findBeltEndpointAt(pointer.worldX, pointer.worldY);
+
+        if (beltEndpoint) {
+            // BeltEndpoint clicked - start dragging it
+            this.draggedBeltEndpoint = beltEndpoint;
+            this.isDragging = true;
+            this.dragStart.set(pointer.worldX, pointer.worldY);
+            beltEndpoint.startDrag();
+            return;
+        }
+
         // Check for entity click
         const entity = this.findEntityAt(pointer.worldX, pointer.worldY);
 
@@ -397,15 +462,32 @@ export class WorkbenchSceneNew extends CoreGameScene {
         this.beltPreview.clear();
 
         // Find potential end point
-        const endPoint = this.findConnectionPointAt(worldX, worldY);
+        const connectionPoint = this.findConnectionPointAt(worldX, worldY);
+        const beltEndpoint = this.findBeltEndpointAt(worldX, worldY);
+        const endPoint = connectionPoint || beltEndpoint;
 
-        if (endPoint && this.beltStartPoint.canConnectTo(endPoint)) {
-            // Draw valid preview
-            this.beltPreview.lineStyle(4, 0x00ff00, 0.6);
-            this.drawBeltPath(this.beltPreview, this.beltStartPoint, endPoint);
+        if (endPoint) {
+            // Check if valid connection
+            let isValid = true;
+            if (this.beltStartPoint instanceof ConnectionPoint && endPoint instanceof ConnectionPoint) {
+                isValid = this.beltStartPoint.canConnectTo(endPoint);
+            }
+
+            if (isValid && endPoint !== this.beltStartPoint) {
+                // Draw valid preview
+                this.beltPreview.lineStyle(4, 0x00ff00, 0.6);
+                this.drawBeltPath(this.beltPreview, this.beltStartPoint, endPoint);
+            } else {
+                // Draw to cursor
+                this.beltPreview.lineStyle(4, 0xffff00, 0.3);
+                this.beltPreview.beginPath();
+                this.beltPreview.moveTo(this.beltStartPoint.x, this.beltStartPoint.y);
+                this.beltPreview.lineTo(worldX, worldY);
+                this.beltPreview.strokePath();
+            }
         } else {
-            // Draw to cursor
-            this.beltPreview.lineStyle(4, 0xffff00, 0.3);
+            // Draw to cursor (will create new BeltEndpoint)
+            this.beltPreview.lineStyle(4, 0x88ff88, 0.5);
             this.beltPreview.beginPath();
             this.beltPreview.moveTo(this.beltStartPoint.x, this.beltStartPoint.y);
             this.beltPreview.lineTo(worldX, worldY);
@@ -413,7 +495,7 @@ export class WorkbenchSceneNew extends CoreGameScene {
         }
     }
 
-    private drawBeltPath(graphics: Phaser.GameObjects.Graphics, start: ConnectionPoint, end: ConnectionPoint) {
+    private drawBeltPath(graphics: Phaser.GameObjects.Graphics, start: ConnectionPoint | BeltEndpoint, end: ConnectionPoint | BeltEndpoint) {
         // Simple L-shaped preview
         graphics.beginPath();
         graphics.moveTo(start.x, start.y);
@@ -436,7 +518,9 @@ export class WorkbenchSceneNew extends CoreGameScene {
 
     private cancelBeltPlacement() {
         if (this.beltStartPoint) {
-            this.beltStartPoint.setHovered(false);
+            if ('setHovered' in this.beltStartPoint) {
+                this.beltStartPoint.setHovered(false);
+            }
             this.beltStartPoint = null;
         }
         this.beltPreview?.clear();
@@ -498,6 +582,59 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     /**
+     * Replace a BeltEndpoint with a Junction, reconnecting all attached belts.
+     */
+    private replaceBeltEndpointWithJunction(endpoint: BeltEndpoint) {
+        // Create junction at endpoint position
+        const junction = new Junction(this, endpoint.x, endpoint.y, this.TILE_SIZE);
+        this.junctions.push(junction);
+
+        // Get all belts connected to this endpoint
+        const connectedBelts = Array.from(endpoint.getConnectedBelts());
+
+        // Reconnect each belt to the junction
+        for (const belt of connectedBelts) {
+            // Determine if this endpoint is the start or end of the belt
+            const isStart = belt.startPoint === endpoint;
+            const otherPoint = isStart ? belt.endPoint : belt.startPoint;
+
+            // Find best junction point to connect to
+            const junctionPoint = this.findBestJunctionPointForBelt(junction, otherPoint, endpoint.x, endpoint.y, isStart);
+
+            if (!junctionPoint) {
+                console.warn('Could not find suitable junction point for belt');
+                continue;
+            }
+
+            // Delete old belt
+            this.deleteBelt(belt);
+
+            // Create new belt with junction connection
+            let newBelt: Belt;
+            if (isStart) {
+                newBelt = new Belt(this, junctionPoint, otherPoint, 0);
+            } else {
+                newBelt = new Belt(this, otherPoint, junctionPoint, 0);
+            }
+            this.belts.push(newBelt);
+        }
+
+        // Remove the endpoint from our list and destroy it
+        const idx = this.beltEndpoints.indexOf(endpoint);
+        if (idx > -1) {
+            this.beltEndpoints.splice(idx, 1);
+        }
+        endpoint.destroy();
+
+        // Select the new junction
+        this.deselectAll();
+        this.selectedEntities.add(junction);
+        junction.setSelected(true);
+
+        console.log('Belt endpoint replaced with junction');
+    }
+
+    /**
      * Find the best connection point on a junction to connect to a given connection point.
      */
     private findBestJunctionPoint(
@@ -505,6 +642,35 @@ export class WorkbenchSceneNew extends CoreGameScene {
         targetPoint: ConnectionPoint,
         junctionX: number,
         junctionY: number
+    ): ConnectionPoint | null {
+        // Calculate which side of the junction is closest to the target
+        const dx = targetPoint.x - junctionX;
+        const dy = targetPoint.y - junctionY;
+
+        let bestSide: string;
+
+        if (Math.abs(dx) > Math.abs(dy)) {
+            // Horizontal alignment - use left or right
+            bestSide = dx > 0 ? 'RIGHT' : 'LEFT';
+        } else {
+            // Vertical alignment - use top or bottom
+            bestSide = dy > 0 ? 'BOTTOM' : 'TOP';
+        }
+
+        const point = junction.connectionPoints.get(bestSide);
+        return point?.isAvailable() ? point : null;
+    }
+
+    /**
+     * Find the best connection point on a junction to connect to a belt endpoint or connection point.
+     * Similar to findBestJunctionPoint but works with BeltConnection types.
+     */
+    private findBestJunctionPointForBelt(
+        junction: Junction,
+        targetPoint: ConnectionPoint | BeltEndpoint,
+        junctionX: number,
+        junctionY: number,
+        isOutput: boolean
     ): ConnectionPoint | null {
         // Calculate which side of the junction is closest to the target
         const dx = targetPoint.x - junctionX;
@@ -556,6 +722,18 @@ export class WorkbenchSceneNew extends CoreGameScene {
             if (point) return point;
         }
 
+        return null;
+    }
+
+    private findBeltEndpointAt(worldX: number, worldY: number, threshold: number = 20): BeltEndpoint | null {
+        for (const endpoint of this.beltEndpoints) {
+            const dx = worldX - endpoint.x;
+            const dy = worldY - endpoint.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance <= threshold) {
+                return endpoint;
+            }
+        }
         return null;
     }
 
