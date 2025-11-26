@@ -21,14 +21,14 @@ export interface Direction {
  * @param end - Ending point coordinates
  * @param startDir - Direction to exit from start (perpendicular to connection surface)
  * @param endDir - Direction to enter end (perpendicular to connection surface)
- * @param minStraight - Minimum distance to travel straight out/in (default: 20px)
+ * @param minStraight - Minimum distance to travel straight out/in (default: 40px for clearance)
  */
 export function generate90DegPath(
     start: Point,
     end: Point,
     startDir: Direction,
     endDir: Direction,
-    minStraight: number = 20
+    minStraight: number = 40
 ): Point[] {
     const path: Point[] = [];
 
@@ -86,27 +86,42 @@ function routeBetweenPoints(
         (fromDir.y !== 0 && fromDir.y === -toDir.y)
     );
 
-    if (isUTurn) {
-        // U-turn detected - route perpendicular first to avoid doubling back
-        const clearanceDistance = 60; // Distance to travel perpendicular before turning back
+    // Check if we need to go backwards (target is behind us in our travel direction)
+    const needsReversal =
+        (fromDir.x > 0 && dx < 0) || (fromDir.x < 0 && dx > 0) ||
+        (fromDir.y > 0 && dy < 0) || (fromDir.y < 0 && dy > 0);
+
+    if (isUTurn || needsReversal) {
+        // U-turn or reversal detected - route perpendicular first to avoid doubling back
+        const clearanceDistance = 80; // Increased clearance to avoid factory overlap
 
         if (isFromHorizontal) {
-            // Horizontal U-turn: go perpendicular (up or down) first
-            // Choose direction that moves toward the target
-            const perpendicularDir = dy > 0 ? 1 : -1;
+            // Horizontal movement: go perpendicular (up or down) first
+            // Choose direction based on where target is, or away from origin if aligned
+            let perpendicularDir: number;
+            if (Math.abs(dy) > 5) {
+                perpendicularDir = dy > 0 ? 1 : -1;
+            } else {
+                // If horizontally aligned, pick the direction that moves away
+                perpendicularDir = fromDir.x > 0 ? -1 : 1;
+            }
             const midY = from.y + (clearanceDistance * perpendicularDir);
 
             path.push({ x: from.x, y: midY });  // Turn perpendicular
             path.push({ x: to.x, y: midY });     // Travel across
-            path.push({ x: to.x, y: to.y });     // Turn back to target
         } else {
-            // Vertical U-turn: go perpendicular (left or right) first
-            const perpendicularDir = dx > 0 ? 1 : -1;
+            // Vertical movement: go perpendicular (left or right) first
+            let perpendicularDir: number;
+            if (Math.abs(dx) > 5) {
+                perpendicularDir = dx > 0 ? 1 : -1;
+            } else {
+                // If vertically aligned, pick the direction that moves away
+                perpendicularDir = fromDir.y > 0 ? -1 : 1;
+            }
             const midX = from.x + (clearanceDistance * perpendicularDir);
 
             path.push({ x: midX, y: from.y });   // Turn perpendicular
             path.push({ x: midX, y: to.y });     // Travel across
-            path.push({ x: to.x, y: to.y });     // Turn back to target
         }
     } else if (isFromHorizontal === isToHorizontal) {
         // Same orientation (but not U-turn) - need 3 segments
