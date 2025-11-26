@@ -270,17 +270,26 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private handleJunctionPlacement(pointer: Phaser.Input.Pointer) {
-        const snap = this.getSnappedWorldPoint(pointer.worldX, pointer.worldY);
-        const centerX = snap.x + this.TILE_SIZE / 2;
-        const centerY = snap.y + this.TILE_SIZE / 2;
+        // Check if user clicked on an existing belt
+        const clickedBelt = this.findBeltAt(pointer.worldX, pointer.worldY);
 
-        const junction = new Junction(this, centerX, centerY, this.TILE_SIZE);
-        this.junctions.push(junction);
+        if (clickedBelt) {
+            // Split the belt and insert junction
+            this.splitBeltWithJunction(clickedBelt, pointer.worldX, pointer.worldY);
+        } else {
+            // Place junction normally
+            const snap = this.getSnappedWorldPoint(pointer.worldX, pointer.worldY);
+            const centerX = snap.x + this.TILE_SIZE / 2;
+            const centerY = snap.y + this.TILE_SIZE / 2;
 
-        // Select new junction
-        this.deselectAll();
-        this.selectedEntities.add(junction);
-        junction.setSelected(true);
+            const junction = new Junction(this, centerX, centerY, this.TILE_SIZE);
+            this.junctions.push(junction);
+
+            // Select new junction
+            this.deselectAll();
+            this.selectedEntities.add(junction);
+            junction.setSelected(true);
+        }
     }
 
     private handleBeltClick(pointer: Phaser.Input.Pointer) {
@@ -425,6 +434,88 @@ export class WorkbenchSceneNew extends CoreGameScene {
             this.beltStartPoint = null;
         }
         this.beltPreview?.clear();
+    }
+
+    /**
+     * Split a belt by inserting a junction at the clicked position.
+     * Creates two new belts connecting through the junction.
+     */
+    private splitBeltWithJunction(belt: Belt, clickX: number, clickY: number) {
+        // Store original connection points
+        const originalStart = belt.startPoint;
+        const originalEnd = belt.endPoint;
+
+        // Snap junction to grid near click point
+        const snap = this.getSnappedWorldPoint(clickX, clickY);
+        const junctionX = snap.x + this.TILE_SIZE / 2;
+        const junctionY = snap.y + this.TILE_SIZE / 2;
+
+        // Create junction at click position
+        const junction = new Junction(this, junctionX, junctionY, this.TILE_SIZE);
+        this.junctions.push(junction);
+
+        // Determine which connection points to use on the junction
+        // We want to create a flow: originalStart -> junction -> originalEnd
+        // Figure out which sides of the junction align with the belt direction
+
+        const startDir = originalStart.getDirectionVector();
+        const endDir = originalEnd.getDirectionVector();
+
+        // Find best connection points on junction for entry and exit
+        const entryPoint = this.findBestJunctionPoint(junction, originalStart, junctionX, junctionY);
+        const exitPoint = this.findBestJunctionPoint(junction, originalEnd, junctionX, junctionY);
+
+        if (!entryPoint || !exitPoint || entryPoint === exitPoint) {
+            // Failed to find suitable points, cleanup and abort
+            junction.destroyJunction();
+            const idx = this.junctions.indexOf(junction);
+            if (idx > -1) this.junctions.splice(idx, 1);
+            return;
+        }
+
+        // Delete the original belt
+        this.deleteBelt(belt);
+
+        // Create two new belts
+        const belt1 = new Belt(this, originalStart, entryPoint, 0);
+        this.belts.push(belt1);
+
+        const belt2 = new Belt(this, exitPoint, originalEnd, 0);
+        this.belts.push(belt2);
+
+        // Select the new junction
+        this.deselectAll();
+        this.selectedEntities.add(junction);
+        junction.setSelected(true);
+
+        console.log('Belt split with junction');
+    }
+
+    /**
+     * Find the best connection point on a junction to connect to a given connection point.
+     */
+    private findBestJunctionPoint(
+        junction: Junction,
+        targetPoint: ConnectionPoint,
+        junctionX: number,
+        junctionY: number
+    ): ConnectionPoint | null {
+        // Calculate which side of the junction is closest to the target
+        const dx = targetPoint.x - junctionX;
+        const dy = targetPoint.y - junctionY;
+
+        let bestSide: string;
+
+        if (Math.abs(dx) > Math.abs(dy)) {
+            // Horizontal alignment - use left or right
+            bestSide = dx > 0 ? 'RIGHT' : 'LEFT';
+        } else {
+            // Vertical alignment - use top or bottom
+            bestSide = dy > 0 ? 'BOTTOM' : 'TOP';
+        }
+
+        const point = junction.connectionPoints.get(bestSide);
+        return point?.isAvailable() ? point : null;
     }
 
     // ===== CONNECTION POINT HELPERS =====
