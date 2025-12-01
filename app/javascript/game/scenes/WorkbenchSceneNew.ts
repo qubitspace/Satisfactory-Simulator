@@ -40,6 +40,12 @@ export class WorkbenchSceneNew extends CoreGameScene {
     // Belt segment placement state
     private beltSegmentGhost: Phaser.GameObjects.Graphics | null = null;
     private lastPlacedSegmentGrid: { x: number; y: number } | null = null;
+    private ghostDirection: BeltDirection = 'EAST'; // Current rotation for ghost
+
+    // Drag-to-draw belt state
+    private isDraggingBelt: boolean = false;
+    private dragStartGrid: { x: number; y: number } | null = null;
+    private dragPath: Array<{ x: number; y: number }> = [];
 
     // Factory placement ghost
     private factoryGhost: Phaser.GameObjects.Container | null = null;
@@ -109,22 +115,36 @@ export class WorkbenchSceneNew extends CoreGameScene {
         }
 
         // Update belt segment ghost
-        if (this.activeTool === 'BELT' && this.beltSegmentGhost) {
+        if (this.activeTool === 'BELT' && this.beltSegmentGhost && !this.isDraggingBelt) {
             const gridPos = this.worldToGrid(pointer.worldX, pointer.worldY);
             const snap = this.gridToWorld(gridPos.x, gridPos.y);
 
             // Check if valid placement location
-            const isValid = this.canPlaceBeltSegment(gridPos.x, gridPos.y);
+            const canPlace = this.canPlaceBeltSegment(gridPos.x, gridPos.y);
+            const existingSegments = this.getSegmentsAt(gridPos.x, gridPos.y);
+            const isValid = canPlace || existingSegments.length > 0; // Can place if empty OR can add layer
 
             this.beltSegmentGhost.clear();
             this.beltSegmentGhost.setVisible(true);
 
-            // Draw ghost segment
+            // Draw ghost segment background
             const color = isValid ? 0x88ff88 : 0xff8888;
             this.beltSegmentGhost.fillStyle(color, 0.3);
             this.beltSegmentGhost.fillRect(snap.x, snap.y, this.TILE_SIZE, this.TILE_SIZE);
             this.beltSegmentGhost.lineStyle(2, color, 0.8);
             this.beltSegmentGhost.strokeRect(snap.x + 1, snap.y + 1, this.TILE_SIZE - 2, this.TILE_SIZE - 2);
+
+            // Draw direction arrow
+            this.drawDirectionArrowOnGhost(snap.x, snap.y, this.ghostDirection, color);
+
+            // Show layer indicator if crossing
+            if (existingSegments.length > 0) {
+                const nextLayer = existingSegments.length;
+                const layerText = nextLayer === 1 ? '↗' : '↗↗';
+                this.beltSegmentGhost.fillStyle(0xffffff, 0.8);
+                // Using fillText is not available on Graphics, so we'll skip for now
+                // Could create a Text object if needed
+            }
         }
 
         // Update connection point hover states
@@ -169,6 +189,7 @@ export class WorkbenchSceneNew extends CoreGameScene {
         this.input.keyboard?.on('keydown-ONE', () => this.setTool('HAND'));
         this.input.keyboard?.on('keydown-TWO', () => this.setTool('BELT'));
         this.input.keyboard?.on('keydown-THREE', () => this.setTool('JUNCTION'));
+        this.input.keyboard?.on('keydown-R', () => this.rotateBeltGhost());
 
         // Mouse events
         this.input.on('pointerdown', this.onPointerDown, this);
@@ -207,7 +228,29 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private onPointerMove(pointer: Phaser.Input.Pointer) {
-        // Handle dragging
+        // Handle belt drag-to-draw
+        if (this.isDraggingBelt && pointer.isDown) {
+            const gridPos = this.worldToGrid(pointer.worldX, pointer.worldY);
+
+            // Check if we've moved to a new grid cell
+            const lastPos = this.dragPath[this.dragPath.length - 1];
+            if (lastPos && (gridPos.x !== lastPos.x || gridPos.y !== lastPos.y)) {
+                // Check if adjacent (only horizontal/vertical, no diagonal)
+                const dx = gridPos.x - lastPos.x;
+                const dy = gridPos.y - lastPos.y;
+
+                if (Math.abs(dx) + Math.abs(dy) === 1) {
+                    // Valid adjacent move
+                    this.dragPath.push({ x: gridPos.x, y: gridPos.y });
+
+                    // Draw preview
+                    this.updateBeltDragPreview();
+                }
+            }
+            return;
+        }
+
+        // Handle entity dragging
         if (this.isDragging && pointer.isDown) {
             if (this.draggedBeltEndpoint) {
                 // Dragging a belt endpoint
@@ -242,7 +285,17 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private onPointerUp(pointer: Phaser.Input.Pointer) {
-        // End dragging
+        // End belt drag-to-draw
+        if (this.isDraggingBelt) {
+            this.finalizeBeltDrag();
+            this.isDraggingBelt = false;
+            this.dragStartGrid = null;
+            this.dragPath = [];
+            this.beltPreview?.clear();
+            return;
+        }
+
+        // End entity dragging
         if (this.isDragging) {
             this.isDragging = false;
 
@@ -348,37 +401,12 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private handleBeltClick(pointer: Phaser.Input.Pointer) {
-        // NEW SYSTEM: Place individual belt segments
+        // Start drag-to-draw
         const gridPos = this.worldToGrid(pointer.worldX, pointer.worldY);
 
-        // Check if can place segment here
-        if (!this.canPlaceBeltSegment(gridPos.x, gridPos.y)) {
-            return;
-        }
-
-        // Determine flow direction based on last placed segment or default
-        let flowDirection: BeltDirection = 'EAST'; // Default direction
-
-        if (this.lastPlacedSegmentGrid) {
-            const dx = gridPos.x - this.lastPlacedSegmentGrid.x;
-            const dy = gridPos.y - this.lastPlacedSegmentGrid.y;
-
-            // Only place if adjacent (prevent diagonal)
-            if (Math.abs(dx) + Math.abs(dy) !== 1) {
-                // Not adjacent - reset chain
-                this.lastPlacedSegmentGrid = null;
-            } else {
-                // Determine direction from movement
-                const dir = BeltSegment.getDirectionFromOffset(dx, dy);
-                if (dir) flowDirection = dir;
-            }
-        }
-
-        // Place the segment
-        this.placeBeltSegment(gridPos.x, gridPos.y, flowDirection);
-
-        // Remember for next placement
-        this.lastPlacedSegmentGrid = { x: gridPos.x, y: gridPos.y };
+        this.isDraggingBelt = true;
+        this.dragStartGrid = { x: gridPos.x, y: gridPos.y };
+        this.dragPath = [{ x: gridPos.x, y: gridPos.y }];
     }
 
     private handleDelete(pointer: Phaser.Input.Pointer) {
@@ -546,13 +574,9 @@ export class WorkbenchSceneNew extends CoreGameScene {
 
     /**
      * Check if a belt segment can be placed at grid position
+     * NOTE: This only checks for factories/junctions. Use getSegmentsAt() to check for layering.
      */
     private canPlaceBeltSegment(gridX: number, gridY: number): boolean {
-        // Check if already has a segment here
-        if (this.findBeltSegmentAt(gridX, gridY)) {
-            return false;
-        }
-
         // Check if occupied by factory
         for (const factory of this.factories) {
             const factoryGridX = Math.floor(factory.x / this.TILE_SIZE);
@@ -580,35 +604,45 @@ export class WorkbenchSceneNew extends CoreGameScene {
     /**
      * Place a belt segment at grid position
      */
-    private placeBeltSegment(gridX: number, gridY: number, flowDirection: BeltDirection): void {
-        const segment = new BeltSegment(this, gridX, gridY, this.TILE_SIZE, flowDirection);
+    private placeBeltSegment(gridX: number, gridY: number, flowDirection: BeltDirection, layer: number = 0): void {
+        const segment = new BeltSegment(this, gridX, gridY, this.TILE_SIZE, flowDirection, layer);
         this.beltSegments.push(segment);
 
-        // Connect to adjacent segments
+        // Connect to adjacent segments on the same layer
         this.connectAdjacentSegments(segment);
 
-        console.log(`Placed belt segment at (${gridX}, ${gridY}) flowing ${flowDirection}`);
+        console.log(`Placed belt segment at (${gridX}, ${gridY}) flowing ${flowDirection}, layer ${layer}`);
     }
 
     /**
-     * Find belt segment at grid position
+     * Find belt segment at grid position (returns first match)
      */
     private findBeltSegmentAt(gridX: number, gridY: number): BeltSegment | null {
         return this.beltSegments.find(s => s.gridX === gridX && s.gridY === gridY) || null;
     }
 
     /**
-     * Connect a segment to adjacent segments
+     * Get all belt segments at a grid position (for layering)
+     */
+    private getSegmentsAt(gridX: number, gridY: number): BeltSegment[] {
+        return this.beltSegments.filter(s => s.gridX === gridX && s.gridY === gridY);
+    }
+
+    /**
+     * Connect a segment to adjacent segments on the same layer
      */
     private connectAdjacentSegments(segment: BeltSegment): void {
         const directions: BeltDirection[] = ['NORTH', 'SOUTH', 'EAST', 'WEST'];
 
         for (const dir of directions) {
             const offset = BeltSegment.getOffsetFromDirection(dir);
-            const neighbor = this.findBeltSegmentAt(
+            const neighborsAtPos = this.getSegmentsAt(
                 segment.gridX + offset.dx,
                 segment.gridY + offset.dy
             );
+
+            // Find neighbor on the same layer
+            const neighbor = neighborsAtPos.find(s => s.layer === segment.layer);
 
             if (neighbor) {
                 // Connect both ways
@@ -629,6 +663,112 @@ export class WorkbenchSceneNew extends CoreGameScene {
             }
         }
         return null;
+    }
+
+    /**
+     * Rotate belt ghost direction
+     */
+    private rotateBeltGhost(): void {
+        if (this.activeTool !== 'BELT') return;
+
+        const rotationMap: Record<BeltDirection, BeltDirection> = {
+            'NORTH': 'EAST',
+            'EAST': 'SOUTH',
+            'SOUTH': 'WEST',
+            'WEST': 'NORTH'
+        };
+        this.ghostDirection = rotationMap[this.ghostDirection];
+    }
+
+    /**
+     * Draw direction arrow on ghost preview
+     */
+    private drawDirectionArrowOnGhost(x: number, y: number, direction: BeltDirection, color: number): void {
+        if (!this.beltSegmentGhost) return;
+
+        const center = this.TILE_SIZE / 2;
+        const arrowSize = 8;
+
+        let angle = 0;
+        if (direction === 'NORTH') angle = -Math.PI / 2;
+        else if (direction === 'SOUTH') angle = Math.PI / 2;
+        else if (direction === 'EAST') angle = 0;
+        else if (direction === 'WEST') angle = Math.PI;
+
+        const cx = x + center;
+        const cy = y + center;
+
+        this.beltSegmentGhost.fillStyle(color, 0.8);
+        this.beltSegmentGhost.fillTriangle(
+            cx + Math.cos(angle) * arrowSize,
+            cy + Math.sin(angle) * arrowSize,
+            cx + Math.cos(angle + 2.5) * arrowSize * 0.6,
+            cy + Math.sin(angle + 2.5) * arrowSize * 0.6,
+            cx + Math.cos(angle - 2.5) * arrowSize * 0.6,
+            cy + Math.sin(angle - 2.5) * arrowSize * 0.6
+        );
+    }
+
+    /**
+     * Update belt drag preview while dragging
+     */
+    private updateBeltDragPreview(): void {
+        if (!this.beltPreview || this.dragPath.length === 0) return;
+
+        this.beltPreview.clear();
+        this.beltPreview.lineStyle(6, 0x88ff88, 0.7);
+
+        for (let i = 0; i < this.dragPath.length; i++) {
+            const pos = this.dragPath[i];
+            const worldPos = this.gridToWorld(pos.x, pos.y);
+            const center = {
+                x: worldPos.x + this.TILE_SIZE / 2,
+                y: worldPos.y + this.TILE_SIZE / 2
+            };
+
+            if (i === 0) {
+                this.beltPreview.beginPath();
+                this.beltPreview.moveTo(center.x, center.y);
+            } else {
+                this.beltPreview.lineTo(center.x, center.y);
+            }
+        }
+
+        this.beltPreview.strokePath();
+    }
+
+    /**
+     * Finalize belt drag and create all segments
+     */
+    private finalizeBeltDrag(): void {
+        if (this.dragPath.length === 0) return;
+
+        console.log(`Creating belt path with ${this.dragPath.length} segments`);
+
+        for (let i = 0; i < this.dragPath.length; i++) {
+            const pos = this.dragPath[i];
+
+            // Determine flow direction from path
+            let flowDirection: BeltDirection = this.ghostDirection; // Use ghost direction for first
+
+            if (i < this.dragPath.length - 1) {
+                // Determine direction from next position
+                const nextPos = this.dragPath[i + 1];
+                const dx = nextPos.x - pos.x;
+                const dy = nextPos.y - pos.y;
+                const dir = BeltSegment.getDirectionFromOffset(dx, dy);
+                if (dir) flowDirection = dir;
+            }
+
+            // Check if we need to add a layer (crossing existing belt)
+            const existingSegments = this.getSegmentsAt(pos.x, pos.y);
+            const layer = existingSegments.length; // 0 if empty, 1+ for elevated
+
+            // Only place if valid (either empty or adding layer)
+            if (layer < 3) { // Max 3 layers (0, 1, 2)
+                this.placeBeltSegment(pos.x, pos.y, flowDirection, layer);
+            }
+        }
     }
 
     /**

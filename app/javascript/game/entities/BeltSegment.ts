@@ -27,6 +27,9 @@ export class BeltSegment {
     private graphics: Phaser.GameObjects.Graphics;
     private container: Phaser.GameObjects.Container;
 
+    // Belt layer (for crossing belts)
+    public layer: number = 0; // 0 = ground, 1 = elevated, 2 = high
+
     // Selection state
     private isSelected: boolean = false;
     private isHovered: boolean = false;
@@ -42,20 +45,23 @@ export class BeltSegment {
         gridX: number,
         gridY: number,
         tileSize: number,
-        flowDirection: BeltDirection
+        flowDirection: BeltDirection,
+        layer: number = 0
     ) {
         this.scene = scene;
         this.gridX = gridX;
         this.gridY = gridY;
         this.tileSize = tileSize;
         this.flowDirection = flowDirection;
+        this.layer = layer;
 
         // Create visual container
         this.container = scene.add.container(
             gridX * tileSize,
             gridY * tileSize
         );
-        this.container.setDepth(40); // Below belts (50) but above grid (0)
+        // Layer affects depth: layer 0 = 40, layer 1 = 45, layer 2 = 50
+        this.container.setDepth(40 + layer * 5);
 
         // Create graphics
         this.graphics = scene.add.graphics();
@@ -147,10 +153,20 @@ export class BeltSegment {
         const beltWidth = 6;
         const halfBelt = beltWidth / 2;
 
-        // Base color
-        let color = 0x888888;
+        // Base color varies by layer
+        let baseColor = 0x888888;
+        if (this.layer === 1) baseColor = 0x999999; // Slightly lighter for elevated
+        if (this.layer === 2) baseColor = 0xaaaaaa; // Even lighter for high
+
+        // Override with selection/hover
+        let color = baseColor;
         if (this.isSelected) color = 0xffff00;
         else if (this.isHovered) color = 0xaaaaaa;
+
+        // Draw supports for elevated belts
+        if (this.layer > 0) {
+            this.drawSupports();
+        }
 
         this.graphics.lineStyle(beltWidth, color, 1.0);
 
@@ -201,6 +217,36 @@ export class BeltSegment {
 
         // Draw direction indicator (small arrow)
         this.drawDirectionArrow();
+    }
+
+    /**
+     * Draw support pillars for elevated belts
+     */
+    private drawSupports(): void {
+        const center = this.tileSize / 2;
+        const supportColor = 0x444444;
+
+        // Draw small vertical lines as supports
+        this.graphics.lineStyle(2, supportColor, 0.6);
+
+        if (this.layer === 1) {
+            // Single support in center
+            this.graphics.beginPath();
+            this.graphics.moveTo(center, center + 3);
+            this.graphics.lineTo(center, this.tileSize - 2);
+            this.graphics.strokePath();
+        } else if (this.layer === 2) {
+            // Two supports for higher elevation
+            this.graphics.beginPath();
+            this.graphics.moveTo(center - 6, center + 4);
+            this.graphics.lineTo(center - 6, this.tileSize - 2);
+            this.graphics.strokePath();
+
+            this.graphics.beginPath();
+            this.graphics.moveTo(center + 6, center + 4);
+            this.graphics.lineTo(center + 6, this.tileSize - 2);
+            this.graphics.strokePath();
+        }
     }
 
     /**
@@ -292,6 +338,34 @@ export class BeltSegment {
             case 'EAST': return 'WEST';
             case 'WEST': return 'EAST';
         }
+    }
+
+    /**
+     * Rotate flow direction clockwise
+     */
+    public rotateClockwise(): void {
+        const rotationMap: Record<BeltDirection, BeltDirection> = {
+            'NORTH': 'EAST',
+            'EAST': 'SOUTH',
+            'SOUTH': 'WEST',
+            'WEST': 'NORTH'
+        };
+        this.flowDirection = rotationMap[this.flowDirection];
+        this.draw();
+    }
+
+    /**
+     * Rotate flow direction counter-clockwise
+     */
+    public rotateCounterClockwise(): void {
+        const rotationMap: Record<BeltDirection, BeltDirection> = {
+            'NORTH': 'WEST',
+            'WEST': 'SOUTH',
+            'SOUTH': 'EAST',
+            'EAST': 'NORTH'
+        };
+        this.flowDirection = rotationMap[this.flowDirection];
+        this.draw();
     }
 
     /**
