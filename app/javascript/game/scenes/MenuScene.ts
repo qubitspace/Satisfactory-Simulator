@@ -59,7 +59,7 @@ export class MenuScene extends Phaser.Scene {
             'Complete objectives and unlock new tiers',
             '#FF6B35',
             () => {
-                this.scene.start('WorkbenchScene', {
+                this.scene.start('WorkbenchSceneNew', {
                     mode: 'CAMPAIGN',
                     levelData: {
                         id: 'level_01',
@@ -79,7 +79,7 @@ export class MenuScene extends Phaser.Scene {
             'Unlimited resources and creative freedom',
             '#4ECDC4',
             () => {
-                this.scene.start('WorkbenchScene', {
+                this.scene.start('WorkbenchSceneNew', {
                     mode: 'SANDBOX',
                     levelData: null
                 });
