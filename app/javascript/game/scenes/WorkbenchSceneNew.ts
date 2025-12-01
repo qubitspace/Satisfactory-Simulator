@@ -4,6 +4,7 @@ import { DataManager } from "../managers/DataManager";
 import { Factory } from "../entities/Factory";
 import { Junction } from "../entities/Junction";
 import { Belt } from "../entities/Belt";
+import { BeltSegment, BeltDirection } from "../entities/BeltSegment";
 import { ConnectionPoint } from "../entities/ConnectionPoint";
 import { BeltEndpoint } from "../entities/BeltEndpoint";
 
@@ -23,16 +24,22 @@ export class WorkbenchSceneNew extends CoreGameScene {
     // Entities
     private factories: Factory[] = [];
     private junctions: Junction[] = [];
-    private belts: Belt[] = [];
+    private belts: Belt[] = []; // Legacy - will be phased out
+    private beltSegments: BeltSegment[] = []; // New manual placement system
 
     // Selection
     private selectedEntities: Set<Entity> = new Set();
+    private selectedSegments: Set<BeltSegment> = new Set();
     private hoveredConnectionPoint: ConnectionPoint | null = null;
 
-    // Belt placement state
+    // Belt placement state (legacy - will be replaced)
     private beltStartPoint: ConnectionPoint | BeltEndpoint | null = null;
     private beltPreview: Phaser.GameObjects.Graphics | null = null;
     private beltEndpoints: BeltEndpoint[] = []; // Track all belt endpoints
+
+    // Belt segment placement state
+    private beltSegmentGhost: Phaser.GameObjects.Graphics | null = null;
+    private lastPlacedSegmentGrid: { x: number; y: number } | null = null;
 
     // Factory placement ghost
     private factoryGhost: Phaser.GameObjects.Container | null = null;
@@ -101,9 +108,23 @@ export class WorkbenchSceneNew extends CoreGameScene {
             this.junctionGhost.setPosition(centerX, centerY);
         }
 
-        // Update belt preview
-        if (this.activeTool === 'BELT' && this.beltStartPoint && this.beltPreview) {
-            this.updateBeltPreview(pointer.worldX, pointer.worldY);
+        // Update belt segment ghost
+        if (this.activeTool === 'BELT' && this.beltSegmentGhost) {
+            const gridPos = this.worldToGrid(pointer.worldX, pointer.worldY);
+            const snap = this.gridToWorld(gridPos.x, gridPos.y);
+
+            // Check if valid placement location
+            const isValid = this.canPlaceBeltSegment(gridPos.x, gridPos.y);
+
+            this.beltSegmentGhost.clear();
+            this.beltSegmentGhost.setVisible(true);
+
+            // Draw ghost segment
+            const color = isValid ? 0x88ff88 : 0xff8888;
+            this.beltSegmentGhost.fillStyle(color, 0.3);
+            this.beltSegmentGhost.fillRect(snap.x, snap.y, this.TILE_SIZE, this.TILE_SIZE);
+            this.beltSegmentGhost.lineStyle(2, color, 0.8);
+            this.beltSegmentGhost.strokeRect(snap.x + 1, snap.y + 1, this.TILE_SIZE - 2, this.TILE_SIZE - 2);
         }
 
         // Update connection point hover states
@@ -128,8 +149,11 @@ export class WorkbenchSceneNew extends CoreGameScene {
         this.junctionGhost = this.add.circle(0, 0, 12, 0x888888, 0.5).setDepth(1000).setVisible(false);
         this.junctionGhost.setStrokeStyle(2, 0xffffff, 0.8);
 
-        // Belt preview
+        // Belt preview (legacy)
         this.beltPreview = this.add.graphics().setDepth(1000);
+
+        // Belt segment ghost (new system)
+        this.beltSegmentGhost = this.add.graphics().setDepth(1000).setVisible(false);
 
         // Box selection
         this.boxSelectGraphics = this.add.graphics().setDepth(2000);
@@ -324,74 +348,37 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private handleBeltClick(pointer: Phaser.Input.Pointer) {
-        // Find what was clicked (ConnectionPoint, BeltEndpoint, or empty space)
-        const connectionPoint = this.findConnectionPointAt(pointer.worldX, pointer.worldY);
-        const beltEndpoint = this.findBeltEndpointAt(pointer.worldX, pointer.worldY);
+        // NEW SYSTEM: Place individual belt segments
+        const gridPos = this.worldToGrid(pointer.worldX, pointer.worldY);
 
-        // Determine the target point
-        let targetPoint: ConnectionPoint | BeltEndpoint | null = connectionPoint || beltEndpoint;
+        // Check if can place segment here
+        if (!this.canPlaceBeltSegment(gridPos.x, gridPos.y)) {
+            return;
+        }
 
-        if (!this.beltStartPoint) {
-            // First click - start belt placement
-            if (connectionPoint) {
-                // Start from a connection point
-                if (!connectionPoint.isAvailable()) {
-                    return; // Already connected
-                }
-                this.beltStartPoint = connectionPoint;
-                if ('setHovered' in connectionPoint) {
-                    connectionPoint.setHovered(true);
-                }
-            } else if (beltEndpoint) {
-                // Start from an existing belt endpoint
-                this.beltStartPoint = beltEndpoint;
+        // Determine flow direction based on last placed segment or default
+        let flowDirection: BeltDirection = 'EAST'; // Default direction
+
+        if (this.lastPlacedSegmentGrid) {
+            const dx = gridPos.x - this.lastPlacedSegmentGrid.x;
+            const dy = gridPos.y - this.lastPlacedSegmentGrid.y;
+
+            // Only place if adjacent (prevent diagonal)
+            if (Math.abs(dx) + Math.abs(dy) !== 1) {
+                // Not adjacent - reset chain
+                this.lastPlacedSegmentGrid = null;
             } else {
-                // Start in empty space - create a new BeltEndpoint
-                const newEndpoint = new BeltEndpoint(this, pointer.worldX, pointer.worldY);
-                this.beltEndpoints.push(newEndpoint);
-                this.beltStartPoint = newEndpoint;
-            }
-        } else {
-            // Continue belt chain - create segment
-            let endPoint: ConnectionPoint | BeltEndpoint;
-
-            if (connectionPoint) {
-                // Connecting to a connection point
-                if (!connectionPoint.isAvailable()) {
-                    return; // Already connected
-                }
-                // Check compatibility if starting from ConnectionPoint
-                if (this.beltStartPoint instanceof ConnectionPoint &&
-                    !this.beltStartPoint.canConnectTo(connectionPoint)) {
-                    return; // Invalid connection
-                }
-                endPoint = connectionPoint;
-            } else if (beltEndpoint && beltEndpoint !== this.beltStartPoint) {
-                // Connecting to an existing belt endpoint
-                endPoint = beltEndpoint;
-            } else {
-                // Create new BeltEndpoint in empty space
-                const newEndpoint = new BeltEndpoint(this, pointer.worldX, pointer.worldY);
-                this.beltEndpoints.push(newEndpoint);
-                endPoint = newEndpoint;
-            }
-
-            // Create the belt segment!
-            const obstacles = this.getObstacles();
-            const belt = new Belt(this, this.beltStartPoint, endPoint, 0, obstacles);
-            this.belts.push(belt);
-
-            // Clear start hover state
-            if (this.beltStartPoint instanceof ConnectionPoint && 'setHovered' in this.beltStartPoint) {
-                this.beltStartPoint.setHovered(false);
-            }
-
-            // Continue from this endpoint for next segment
-            this.beltStartPoint = endPoint;
-            if (endPoint instanceof ConnectionPoint && 'setHovered' in endPoint) {
-                endPoint.setHovered(true);
+                // Determine direction from movement
+                const dir = BeltSegment.getDirectionFromOffset(dx, dy);
+                if (dir) flowDirection = dir;
             }
         }
+
+        // Place the segment
+        this.placeBeltSegment(gridPos.x, gridPos.y, flowDirection);
+
+        // Remember for next placement
+        this.lastPlacedSegmentGrid = { x: gridPos.x, y: gridPos.y };
     }
 
     private handleDelete(pointer: Phaser.Input.Pointer) {
@@ -403,7 +390,14 @@ export class WorkbenchSceneNew extends CoreGameScene {
             return;
         }
 
-        // Check for belt
+        // Check for belt segment
+        const segment = this.findBeltSegmentAtWorld(pointer.worldX, pointer.worldY);
+        if (segment) {
+            this.deleteBeltSegment(segment);
+            return;
+        }
+
+        // Check for legacy belt
         const belt = this.findBeltAt(pointer.worldX, pointer.worldY);
         if (belt) {
             this.deleteBelt(belt);
@@ -525,6 +519,116 @@ export class WorkbenchSceneNew extends CoreGameScene {
             this.beltStartPoint = null;
         }
         this.beltPreview?.clear();
+        this.lastPlacedSegmentGrid = null;
+    }
+
+    // ===== BELT SEGMENT HELPERS (NEW SYSTEM) =====
+
+    /**
+     * Convert world coordinates to grid coordinates
+     */
+    private worldToGrid(worldX: number, worldY: number): { x: number; y: number } {
+        return {
+            x: Math.floor(worldX / this.TILE_SIZE),
+            y: Math.floor(worldY / this.TILE_SIZE)
+        };
+    }
+
+    /**
+     * Convert grid coordinates to world coordinates (top-left)
+     */
+    private gridToWorld(gridX: number, gridY: number): { x: number; y: number } {
+        return {
+            x: gridX * this.TILE_SIZE,
+            y: gridY * this.TILE_SIZE
+        };
+    }
+
+    /**
+     * Check if a belt segment can be placed at grid position
+     */
+    private canPlaceBeltSegment(gridX: number, gridY: number): boolean {
+        // Check if already has a segment here
+        if (this.findBeltSegmentAt(gridX, gridY)) {
+            return false;
+        }
+
+        // Check if occupied by factory
+        for (const factory of this.factories) {
+            const factoryGridX = Math.floor(factory.x / this.TILE_SIZE);
+            const factoryGridY = Math.floor(factory.y / this.TILE_SIZE);
+
+            if (gridX >= factoryGridX && gridX < factoryGridX + factory.gridWidth &&
+                gridY >= factoryGridY && gridY < factoryGridY + factory.gridHeight) {
+                return false;
+            }
+        }
+
+        // Check if occupied by junction
+        for (const junction of this.junctions) {
+            const junctionGridX = Math.floor(junction.x / this.TILE_SIZE);
+            const junctionGridY = Math.floor(junction.y / this.TILE_SIZE);
+
+            if (gridX === junctionGridX && gridY === junctionGridY) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Place a belt segment at grid position
+     */
+    private placeBeltSegment(gridX: number, gridY: number, flowDirection: BeltDirection): void {
+        const segment = new BeltSegment(this, gridX, gridY, this.TILE_SIZE, flowDirection);
+        this.beltSegments.push(segment);
+
+        // Connect to adjacent segments
+        this.connectAdjacentSegments(segment);
+
+        console.log(`Placed belt segment at (${gridX}, ${gridY}) flowing ${flowDirection}`);
+    }
+
+    /**
+     * Find belt segment at grid position
+     */
+    private findBeltSegmentAt(gridX: number, gridY: number): BeltSegment | null {
+        return this.beltSegments.find(s => s.gridX === gridX && s.gridY === gridY) || null;
+    }
+
+    /**
+     * Connect a segment to adjacent segments
+     */
+    private connectAdjacentSegments(segment: BeltSegment): void {
+        const directions: BeltDirection[] = ['NORTH', 'SOUTH', 'EAST', 'WEST'];
+
+        for (const dir of directions) {
+            const offset = BeltSegment.getOffsetFromDirection(dir);
+            const neighbor = this.findBeltSegmentAt(
+                segment.gridX + offset.dx,
+                segment.gridY + offset.dy
+            );
+
+            if (neighbor) {
+                // Connect both ways
+                segment.connectTo(dir, neighbor);
+                const oppositeDir = BeltSegment.getOppositeDirection(dir);
+                neighbor.connectTo(oppositeDir, segment);
+            }
+        }
+    }
+
+    /**
+     * Find belt segment at world position
+     */
+    private findBeltSegmentAtWorld(worldX: number, worldY: number): BeltSegment | null {
+        for (const segment of this.beltSegments) {
+            if (segment.containsPoint(worldX, worldY)) {
+                return segment;
+            }
+        }
+        return null;
     }
 
     /**
@@ -837,6 +941,30 @@ export class WorkbenchSceneNew extends CoreGameScene {
         belt.destroyBelt();
     }
 
+    private deleteBeltSegment(segment: BeltSegment) {
+        // Disconnect from neighbors
+        const directions: BeltDirection[] = ['NORTH', 'SOUTH', 'EAST', 'WEST'];
+        for (const dir of directions) {
+            const offset = BeltSegment.getOffsetFromDirection(dir);
+            const neighbor = this.findBeltSegmentAt(
+                segment.gridX + offset.dx,
+                segment.gridY + offset.dy
+            );
+
+            if (neighbor) {
+                const oppositeDir = BeltSegment.getOppositeDirection(dir);
+                neighbor.disconnectFrom(oppositeDir);
+            }
+        }
+
+        // Remove from list
+        const idx = this.beltSegments.indexOf(segment);
+        if (idx > -1) this.beltSegments.splice(idx, 1);
+
+        // Destroy visuals
+        segment.destroy();
+    }
+
     private findConnectedBelts(entity: Entity): Belt[] {
         const connected: Belt[] = [];
 
@@ -965,6 +1093,7 @@ export class WorkbenchSceneNew extends CoreGameScene {
         this.cancelBeltPlacement();
         this.factoryGhost?.setVisible(false);
         this.junctionGhost?.setVisible(false);
+        this.beltSegmentGhost?.setVisible(false);
     }
 
     private setupFactoryGhost() {
@@ -1145,27 +1274,21 @@ export class WorkbenchSceneNew extends CoreGameScene {
         );
         this.junctions.push(junction1);
 
-        // Connect them with belts
-        const obstacles = this.getObstacles();
+        // Legacy auto-routed belts commented out - use manual segment placement now
+        // const obstacles = this.getObstacles();
+        // if (smelter1.outputs[0] && smelter2.inputs[0]) {
+        //     const belt1 = new Belt(this, smelter1.outputs[0], smelter2.inputs[0], 0, obstacles);
+        //     this.belts.push(belt1);
+        // }
+        // if (smelter2.outputs[0] && constructor1.inputs[0]) {
+        //     const belt2 = new Belt(this, smelter2.outputs[0], constructor1.inputs[0], 0, obstacles);
+        //     this.belts.push(belt2);
+        // }
+        // if (smelter1.inputs[1] && junction1.connectionPoints.get('RIGHT')) {
+        //     const belt3 = new Belt(this, junction1.connectionPoints.get('RIGHT')!, smelter1.inputs[1], 0, obstacles);
+        //     this.belts.push(belt3);
+        // }
 
-        // Smelter1 output -> Smelter2 input
-        if (smelter1.outputs[0] && smelter2.inputs[0]) {
-            const belt1 = new Belt(this, smelter1.outputs[0], smelter2.inputs[0], 0, obstacles);
-            this.belts.push(belt1);
-        }
-
-        // Smelter2 output -> Constructor input
-        if (smelter2.outputs[0] && constructor1.inputs[0]) {
-            const belt2 = new Belt(this, smelter2.outputs[0], constructor1.inputs[0], 0, obstacles);
-            this.belts.push(belt2);
-        }
-
-        // Smelter1 second input -> Junction (for testing complex routing)
-        if (smelter1.inputs[1] && junction1.connectionPoints.get('RIGHT')) {
-            const belt3 = new Belt(this, junction1.connectionPoints.get('RIGHT')!, smelter1.inputs[1], 0, obstacles);
-            this.belts.push(belt3);
-        }
-
-        console.log('Test scene loaded: 3 factories, 1 junction, 3 belts');
+        console.log('Test scene loaded: 3 factories, 1 junction. Use Belt tool to manually place belt segments!');
     }
 }
