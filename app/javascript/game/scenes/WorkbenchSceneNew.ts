@@ -7,6 +7,7 @@ import { Belt } from "../entities/Belt";
 import { BeltSegment, BeltDirection } from "../entities/BeltSegment";
 import { ConnectionPoint } from "../entities/ConnectionPoint";
 import { BeltEndpoint } from "../entities/BeltEndpoint";
+import { generateSmartPath, Point, Direction } from "../utils/BeltRouting";
 
 type ToolMode = 'HAND' | 'FACTORY' | 'JUNCTION' | 'BELT' | 'DELETE';
 
@@ -42,7 +43,13 @@ export class WorkbenchSceneNew extends CoreGameScene {
     private lastPlacedSegmentGrid: { x: number; y: number } | null = null;
     private ghostDirection: BeltDirection = 'EAST'; // Current rotation for ghost
 
-    // Drag-to-draw belt state
+    // Section-based belt routing state
+    private beltSectionStart: { x: number; y: number } | null = null; // Grid position of start
+    private beltSectionStartDir: BeltDirection = 'EAST'; // Direction exiting start
+    private beltSectionEndDir: BeltDirection = 'EAST'; // Direction entering end (can rotate with R)
+    private beltSectionPreviewPath: Array<{ x: number; y: number; dir: BeltDirection }> = [];
+
+    // Drag-to-draw belt state (deprecated - keeping for now)
     private isDraggingBelt: boolean = false;
     private dragStartGrid: { x: number; y: number } | null = null;
     private dragPath: Array<{ x: number; y: number }> = [];
@@ -119,31 +126,27 @@ export class WorkbenchSceneNew extends CoreGameScene {
             const gridPos = this.worldToGrid(pointer.worldX, pointer.worldY);
             const snap = this.gridToWorld(gridPos.x, gridPos.y);
 
-            // Check if valid placement location
-            const canPlace = this.canPlaceBeltSegment(gridPos.x, gridPos.y);
-            const existingSegments = this.getSegmentsAt(gridPos.x, gridPos.y);
-            const isValid = canPlace || existingSegments.length > 0; // Can place if empty OR can add layer
-
             this.beltSegmentGhost.clear();
             this.beltSegmentGhost.setVisible(true);
 
-            // Draw ghost segment background
-            const color = isValid ? 0x88ff88 : 0xff8888;
-            this.beltSegmentGhost.fillStyle(color, 0.3);
-            this.beltSegmentGhost.fillRect(snap.x, snap.y, this.TILE_SIZE, this.TILE_SIZE);
-            this.beltSegmentGhost.lineStyle(2, color, 0.8);
-            this.beltSegmentGhost.strokeRect(snap.x + 1, snap.y + 1, this.TILE_SIZE - 2, this.TILE_SIZE - 2);
+            if (this.beltSectionStart) {
+                // Section mode: show preview path from start to current position
+                this.updateBeltSectionPreview(gridPos.x, gridPos.y);
+            } else {
+                // No section started: show single segment ghost
+                const canPlace = this.canPlaceBeltSegment(gridPos.x, gridPos.y);
+                const existingSegments = this.getSegmentsAt(gridPos.x, gridPos.y);
+                const isValid = canPlace || existingSegments.length > 0;
 
-            // Draw direction arrow
-            this.drawDirectionArrowOnGhost(snap.x, snap.y, this.ghostDirection, color);
+                // Draw ghost segment background
+                const color = isValid ? 0x88ff88 : 0xff8888;
+                this.beltSegmentGhost.fillStyle(color, 0.3);
+                this.beltSegmentGhost.fillRect(snap.x, snap.y, this.TILE_SIZE, this.TILE_SIZE);
+                this.beltSegmentGhost.lineStyle(2, color, 0.8);
+                this.beltSegmentGhost.strokeRect(snap.x + 1, snap.y + 1, this.TILE_SIZE - 2, this.TILE_SIZE - 2);
 
-            // Show layer indicator if crossing
-            if (existingSegments.length > 0) {
-                const nextLayer = existingSegments.length;
-                const layerText = nextLayer === 1 ? '↗' : '↗↗';
-                this.beltSegmentGhost.fillStyle(0xffffff, 0.8);
-                // Using fillText is not available on Graphics, so we'll skip for now
-                // Could create a Text object if needed
+                // Draw direction arrow
+                this.drawDirectionArrowOnGhost(snap.x, snap.y, this.ghostDirection, color);
             }
         }
 
@@ -401,12 +404,24 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private handleBeltClick(pointer: Phaser.Input.Pointer) {
-        // Start drag-to-draw
         const gridPos = this.worldToGrid(pointer.worldX, pointer.worldY);
 
-        this.isDraggingBelt = true;
-        this.dragStartGrid = { x: gridPos.x, y: gridPos.y };
-        this.dragPath = [{ x: gridPos.x, y: gridPos.y }];
+        if (!this.beltSectionStart) {
+            // First click: lock in start point
+            this.beltSectionStart = { x: gridPos.x, y: gridPos.y };
+            this.beltSectionStartDir = this.ghostDirection; // Use current ghost direction
+            this.beltSectionEndDir = this.ghostDirection; // Initialize end direction
+            console.log(`Belt section started at (${gridPos.x}, ${gridPos.y}), direction: ${this.ghostDirection}`);
+        } else {
+            // Second click: finalize section and place all segments
+            if (this.beltSectionPreviewPath.length > 0) {
+                this.finalizeBeltSection();
+                // Start new section at current position for continuous building
+                this.beltSectionStart = { x: gridPos.x, y: gridPos.y };
+                this.beltSectionStartDir = this.beltSectionEndDir; // Continue from last end direction
+                this.beltSectionEndDir = this.beltSectionEndDir;
+            }
+        }
     }
 
     private handleDelete(pointer: Phaser.Input.Pointer) {
@@ -677,7 +692,15 @@ export class WorkbenchSceneNew extends CoreGameScene {
             'SOUTH': 'WEST',
             'WEST': 'NORTH'
         };
-        this.ghostDirection = rotationMap[this.ghostDirection];
+
+        if (this.beltSectionStart) {
+            // Rotate the endpoint direction during preview
+            this.beltSectionEndDir = rotationMap[this.beltSectionEndDir];
+            console.log(`Rotated endpoint direction to: ${this.beltSectionEndDir}`);
+        } else {
+            // Rotate the ghost direction when not in section mode
+            this.ghostDirection = rotationMap[this.ghostDirection];
+        }
     }
 
     /**
@@ -769,6 +792,183 @@ export class WorkbenchSceneNew extends CoreGameScene {
                 this.placeBeltSegment(pos.x, pos.y, flowDirection, layer);
             }
         }
+    }
+
+    /**
+     * Update belt section preview - generate path from start to current cursor position
+     */
+    private updateBeltSectionPreview(endGridX: number, endGridY: number): void {
+        if (!this.beltSectionStart || !this.beltSegmentGhost) return;
+
+        // Convert grid positions to world coordinates (center of tiles)
+        const startWorld: Point = {
+            x: this.beltSectionStart.x * this.TILE_SIZE + this.TILE_SIZE / 2,
+            y: this.beltSectionStart.y * this.TILE_SIZE + this.TILE_SIZE / 2
+        };
+
+        const endWorld: Point = {
+            x: endGridX * this.TILE_SIZE + this.TILE_SIZE / 2,
+            y: endGridY * this.TILE_SIZE + this.TILE_SIZE / 2
+        };
+
+        // Convert BeltDirection to Direction for routing
+        const startDir: Direction = this.convertBeltDirectionToDirection(this.beltSectionStartDir);
+        const endDir: Direction = this.convertBeltDirectionToDirection(this.beltSectionEndDir);
+
+        // Generate path using smart routing
+        const obstacles = this.getObstacles();
+        const pathPoints = generateSmartPath(startWorld, endWorld, startDir, endDir, obstacles);
+
+        // Convert path points to grid segments with directions
+        this.beltSectionPreviewPath = this.convertPathToSegments(pathPoints);
+
+        // Validate path for 180-degree turns
+        const has180Turn = this.pathHas180DegreeTurn(this.beltSectionPreviewPath);
+
+        // Draw preview
+        this.drawBeltSectionPreview(this.beltSectionPreviewPath, has180Turn);
+    }
+
+    /**
+     * Convert BeltDirection to Direction vector for routing
+     */
+    private convertBeltDirectionToDirection(beltDir: BeltDirection): Direction {
+        switch (beltDir) {
+            case 'NORTH': return { x: 0, y: -1 };
+            case 'SOUTH': return { x: 0, y: 1 };
+            case 'EAST': return { x: 1, y: 0 };
+            case 'WEST': return { x: -1, y: 0 };
+        }
+    }
+
+    /**
+     * Convert path points to grid segments with flow directions
+     */
+    private convertPathToSegments(pathPoints: Point[]): Array<{ x: number; y: number; dir: BeltDirection }> {
+        const segments: Array<{ x: number; y: number; dir: BeltDirection }> = [];
+
+        for (let i = 0; i < pathPoints.length - 1; i++) {
+            const current = pathPoints[i];
+            const next = pathPoints[i + 1];
+
+            // Calculate direction from current to next
+            const dx = next.x - current.x;
+            const dy = next.y - current.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+
+            if (length < 1) continue; // Skip if points are too close
+
+            const dirX = dx / length;
+            const dirY = dy / length;
+
+            // Determine flow direction
+            let flowDir: BeltDirection = 'EAST';
+            if (Math.abs(dirX) > Math.abs(dirY)) {
+                flowDir = dirX > 0 ? 'EAST' : 'WEST';
+            } else {
+                flowDir = dirY > 0 ? 'SOUTH' : 'NORTH';
+            }
+
+            // Add segments along this line
+            const numSegments = Math.ceil(length / this.TILE_SIZE);
+            for (let j = 0; j < numSegments; j++) {
+                const t = j / numSegments;
+                const worldX = current.x + dx * t;
+                const worldY = current.y + dy * t;
+
+                const gridPos = this.worldToGrid(worldX, worldY);
+
+                // Avoid duplicates
+                const isDuplicate = segments.some(s => s.x === gridPos.x && s.y === gridPos.y);
+                if (!isDuplicate) {
+                    segments.push({ x: gridPos.x, y: gridPos.y, dir: flowDir });
+                }
+            }
+        }
+
+        return segments;
+    }
+
+    /**
+     * Check if path contains any 180-degree turns
+     */
+    private pathHas180DegreeTurn(path: Array<{ x: number; y: number; dir: BeltDirection }>): boolean {
+        for (let i = 1; i < path.length; i++) {
+            const prev = path[i - 1];
+            const curr = path[i];
+
+            // Check if current segment reverses direction from previous
+            const isOpposite = (
+                (prev.dir === 'NORTH' && curr.dir === 'SOUTH') ||
+                (prev.dir === 'SOUTH' && curr.dir === 'NORTH') ||
+                (prev.dir === 'EAST' && curr.dir === 'WEST') ||
+                (prev.dir === 'WEST' && curr.dir === 'EAST')
+            );
+
+            if (isOpposite) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Draw belt section preview
+     */
+    private drawBeltSectionPreview(path: Array<{ x: number; y: number; dir: BeltDirection }>, hasInvalidTurns: boolean): void {
+        if (!this.beltSegmentGhost) return;
+
+        const color = hasInvalidTurns ? 0xff8888 : 0x88ff88; // Red if invalid, green if valid
+
+        // Draw all segments in preview
+        for (const segment of path) {
+            const worldPos = this.gridToWorld(segment.x, segment.y);
+
+            // Draw segment background
+            this.beltSegmentGhost.fillStyle(color, 0.3);
+            this.beltSegmentGhost.fillRect(worldPos.x, worldPos.y, this.TILE_SIZE, this.TILE_SIZE);
+            this.beltSegmentGhost.lineStyle(2, color, 0.6);
+            this.beltSegmentGhost.strokeRect(worldPos.x + 1, worldPos.y + 1, this.TILE_SIZE - 2, this.TILE_SIZE - 2);
+
+            // Draw direction arrow
+            this.drawDirectionArrowOnGhost(worldPos.x, worldPos.y, segment.dir, color);
+        }
+
+        // Draw endpoint direction indicator (larger arrow)
+        if (path.length > 0) {
+            const lastSegment = path[path.length - 1];
+            const worldPos = this.gridToWorld(lastSegment.x, lastSegment.y);
+            this.drawDirectionArrowOnGhost(worldPos.x, worldPos.y, this.beltSectionEndDir, 0xffff00);
+        }
+    }
+
+    /**
+     * Finalize belt section - place all segments from preview
+     */
+    private finalizeBeltSection(): void {
+        if (this.beltSectionPreviewPath.length === 0) return;
+
+        // Check for invalid turns
+        if (this.pathHas180DegreeTurn(this.beltSectionPreviewPath)) {
+            console.warn('Cannot place belt section: contains 180-degree turn');
+            return;
+        }
+
+        console.log(`Placing belt section with ${this.beltSectionPreviewPath.length} segments`);
+
+        for (const segment of this.beltSectionPreviewPath) {
+            // Check if we need to add a layer (crossing existing belt)
+            const existingSegments = this.getSegmentsAt(segment.x, segment.y);
+            const layer = existingSegments.length; // 0 if empty, 1+ for elevated
+
+            // Only place if valid (either empty or adding layer)
+            if (layer < 3) { // Max 3 layers (0, 1, 2)
+                this.placeBeltSegment(segment.x, segment.y, segment.dir, layer);
+            }
+        }
+
+        // Clear preview
+        this.beltSectionPreviewPath = [];
     }
 
     /**
@@ -1251,6 +1451,10 @@ export class WorkbenchSceneNew extends CoreGameScene {
     }
 
     private cancelCurrentAction() {
+        // Clear belt section state
+        this.beltSectionStart = null;
+        this.beltSectionPreviewPath = [];
+
         // Just switch to hand tool (cleanup happens in setTool)
         this.setTool('HAND');
     }
