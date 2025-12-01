@@ -377,7 +377,8 @@ export class WorkbenchSceneNew extends CoreGameScene {
             }
 
             // Create the belt segment!
-            const belt = new Belt(this, this.beltStartPoint, endPoint, 0);
+            const obstacles = this.getObstacles();
+            const belt = new Belt(this, this.beltStartPoint, endPoint, 0, obstacles);
             this.belts.push(belt);
 
             // Clear start hover state
@@ -567,10 +568,11 @@ export class WorkbenchSceneNew extends CoreGameScene {
         this.deleteBelt(belt);
 
         // Create two new belts
-        const belt1 = new Belt(this, originalStart, entryPoint, 0);
+        const obstacles = this.getObstacles();
+        const belt1 = new Belt(this, originalStart, entryPoint, 0, obstacles);
         this.belts.push(belt1);
 
-        const belt2 = new Belt(this, exitPoint, originalEnd, 0);
+        const belt2 = new Belt(this, exitPoint, originalEnd, 0, obstacles);
         this.belts.push(belt2);
 
         // Select the new junction
@@ -610,11 +612,12 @@ export class WorkbenchSceneNew extends CoreGameScene {
             this.deleteBelt(belt);
 
             // Create new belt with junction connection
+            const obstacles = this.getObstacles();
             let newBelt: Belt;
             if (isStart) {
-                newBelt = new Belt(this, junctionPoint, otherPoint, 0);
+                newBelt = new Belt(this, junctionPoint, otherPoint, 0, obstacles);
             } else {
-                newBelt = new Belt(this, otherPoint, junctionPoint, 0);
+                newBelt = new Belt(this, otherPoint, junctionPoint, 0, obstacles);
             }
             this.belts.push(newBelt);
         }
@@ -854,10 +857,43 @@ export class WorkbenchSceneNew extends CoreGameScene {
         return connected;
     }
 
+    /**
+     * Get all obstacles (factories and junctions) for belt routing
+     */
+    private getObstacles(): { x: number; y: number; width: number; height: number }[] {
+        const obstacles: { x: number; y: number; width: number; height: number }[] = [];
+
+        // Add all factories
+        for (const factory of this.factories) {
+            obstacles.push({
+                x: factory.x,
+                y: factory.y,
+                width: factory.gridWidth * this.TILE_SIZE,
+                height: factory.gridHeight * this.TILE_SIZE
+            });
+        }
+
+        // Add all junctions (as small circular obstacles, approximated as squares)
+        for (const junction of this.junctions) {
+            const size = 24; // Junction visual size (radius 12 * 2)
+            obstacles.push({
+                x: junction.x - size / 2,
+                y: junction.y - size / 2,
+                width: size,
+                height: size
+            });
+        }
+
+        return obstacles;
+    }
+
     private updateConnectedBelts() {
-        // Update all belts to redraw with new connection point positions
+        // Get current obstacles
+        const obstacles = this.getObstacles();
+
+        // Update all belts to redraw with new connection point positions and avoid obstacles
         this.belts.forEach(belt => {
-            belt.updatePath();
+            belt.updatePath(obstacles);
         });
     }
 
@@ -1110,21 +1146,23 @@ export class WorkbenchSceneNew extends CoreGameScene {
         this.junctions.push(junction1);
 
         // Connect them with belts
+        const obstacles = this.getObstacles();
+
         // Smelter1 output -> Smelter2 input
         if (smelter1.outputs[0] && smelter2.inputs[0]) {
-            const belt1 = new Belt(this, smelter1.outputs[0], smelter2.inputs[0], 0);
+            const belt1 = new Belt(this, smelter1.outputs[0], smelter2.inputs[0], 0, obstacles);
             this.belts.push(belt1);
         }
 
         // Smelter2 output -> Constructor input
         if (smelter2.outputs[0] && constructor1.inputs[0]) {
-            const belt2 = new Belt(this, smelter2.outputs[0], constructor1.inputs[0], 0);
+            const belt2 = new Belt(this, smelter2.outputs[0], constructor1.inputs[0], 0, obstacles);
             this.belts.push(belt2);
         }
 
         // Smelter1 second input -> Junction (for testing complex routing)
         if (smelter1.inputs[1] && junction1.connectionPoints.get('RIGHT')) {
-            const belt3 = new Belt(this, junction1.connectionPoints.get('RIGHT')!, smelter1.inputs[1], 0);
+            const belt3 = new Belt(this, junction1.connectionPoints.get('RIGHT')!, smelter1.inputs[1], 0, obstacles);
             this.belts.push(belt3);
         }
 

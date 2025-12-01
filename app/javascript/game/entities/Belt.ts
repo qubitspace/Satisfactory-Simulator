@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { ConnectionPoint } from "./ConnectionPoint";
 import { BeltEndpoint } from "./BeltEndpoint";
-import { generateSmartPath, Point } from "../utils/BeltRouting";
+import { generateSmartPath, Point, Obstacle } from "../utils/BeltRouting";
 
 /**
  * BeltConnection can be either a factory/junction ConnectionPoint or a free-standing BeltEndpoint
@@ -33,16 +33,21 @@ export class Belt {
     // Scene reference
     private scene: Phaser.Scene;
 
+    // Obstacles to avoid when routing
+    private obstacles: Obstacle[] = [];
+
     constructor(
         scene: Phaser.Scene,
         startPoint: BeltConnection,
         endPoint: BeltConnection,
-        layer: number = 0
+        layer: number = 0,
+        obstacles: Obstacle[] = []
     ) {
         this.scene = scene;
         this.startPoint = startPoint;
         this.endPoint = endPoint;
         this.layer = layer;
+        this.obstacles = obstacles;
 
         // Create graphics for rendering
         this.graphics = scene.add.graphics();
@@ -67,14 +72,19 @@ export class Belt {
      * Generate routing path between connection points.
      * Call this when connection points move to update the belt path.
      */
-    public updatePath(): void {
+    public updatePath(obstacles?: Obstacle[]): void {
+        // Update obstacles if provided
+        if (obstacles !== undefined) {
+            this.obstacles = obstacles;
+        }
+
         const start = { x: this.startPoint.x, y: this.startPoint.y };
         const end = { x: this.endPoint.x, y: this.endPoint.y };
 
         const startDir = this.startPoint.getDirectionVector();
         const endDir = this.endPoint.getDirectionVector();
 
-        this.path = generateSmartPath(start, end, startDir, endDir);
+        this.path = generateSmartPath(start, end, startDir, endDir, this.obstacles);
 
         this.draw();
         this.updateHitArea();

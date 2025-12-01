@@ -1,6 +1,7 @@
 /**
  * Advanced orthogonal routing for belts with 90° entry/exit requirement.
  * Belts must enter and exit connection points perpendicular to the surface.
+ * Includes obstacle avoidance to prevent belts from going through machines.
  */
 
 export interface Point {
@@ -13,6 +14,91 @@ export interface Direction {
     y: number;  // -1, 0, or 1
 }
 
+export interface Obstacle {
+    x: number;      // Top-left corner
+    y: number;      // Top-left corner
+    width: number;
+    height: number;
+}
+
+/**
+ * Check if a line segment intersects with any obstacle
+ */
+function segmentIntersectsObstacles(
+    x1: number, y1: number,
+    x2: number, y2: number,
+    obstacles: Obstacle[],
+    padding: number = 5
+): boolean {
+    for (const obs of obstacles) {
+        // Expand obstacle bounds by padding
+        const left = obs.x - padding;
+        const right = obs.x + obs.width + padding;
+        const top = obs.y - padding;
+        const bottom = obs.y + obs.height + padding;
+
+        // Check if segment intersects with expanded obstacle rectangle
+        if (lineIntersectsRect(x1, y1, x2, y2, left, top, right, bottom)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Check if a line segment intersects with a rectangle
+ */
+function lineIntersectsRect(
+    x1: number, y1: number,
+    x2: number, y2: number,
+    left: number, top: number,
+    right: number, bottom: number
+): boolean {
+    // Check if either endpoint is inside the rectangle
+    if ((x1 >= left && x1 <= right && y1 >= top && y1 <= bottom) ||
+        (x2 >= left && x2 <= right && y2 >= top && y2 <= bottom)) {
+        return true;
+    }
+
+    // Check if line intersects any of the four edges of the rectangle
+    return (
+        lineSegmentsIntersect(x1, y1, x2, y2, left, top, right, top) ||     // Top edge
+        lineSegmentsIntersect(x1, y1, x2, y2, right, top, right, bottom) || // Right edge
+        lineSegmentsIntersect(x1, y1, x2, y2, left, bottom, right, bottom) || // Bottom edge
+        lineSegmentsIntersect(x1, y1, x2, y2, left, top, left, bottom)      // Left edge
+    );
+}
+
+/**
+ * Check if two line segments intersect
+ */
+function lineSegmentsIntersect(
+    x1: number, y1: number, x2: number, y2: number,
+    x3: number, y3: number, x4: number, y4: number
+): boolean {
+    const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+    if (denom === 0) return false; // Parallel lines
+
+    const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+    const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+
+    return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+}
+
+/**
+ * Check if a path (series of line segments) is clear of obstacles
+ */
+function isPathClear(path: Point[], obstacles: Obstacle[]): boolean {
+    for (let i = 1; i < path.length; i++) {
+        const p1 = path[i - 1];
+        const p2 = path[i];
+        if (segmentIntersectsObstacles(p1.x, p1.y, p2.x, p2.y, obstacles)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /**
  * Generate a path that exits start point at 90° and enters end point at 90°.
  * The path will have multiple segments to accommodate this requirement.
@@ -22,39 +108,72 @@ export interface Direction {
  * @param startDir - Direction to exit from start (perpendicular to connection surface)
  * @param endDir - Direction to enter end (perpendicular to connection surface)
  * @param minStraight - Minimum distance to travel straight out/in (default: 40px for clearance)
+ * @param obstacles - List of obstacles to avoid
  */
 export function generate90DegPath(
     start: Point,
     end: Point,
     startDir: Direction,
     endDir: Direction,
-    minStraight: number = 40
+    minStraight: number = 40,
+    obstacles: Obstacle[] = []
 ): Point[] {
+    // Try different clearance distances to find a path that avoids obstacles
+    const clearanceAttempts = [40, 60, 80, 100, 120, 160];
+
+    for (const clearance of clearanceAttempts) {
+        const path: Point[] = [];
+
+        // Start point
+        path.push({ x: start.x, y: start.y });
+
+        // Exit point: go straight out from start in startDir
+        const exitPoint = {
+            x: start.x + startDir.x * clearance,
+            y: start.y + startDir.y * clearance
+        };
+        path.push(exitPoint);
+
+        // Entry point: go straight into end from endDir
+        // Note: endDir points INTO the connection, so we go opposite direction
+        const entryPoint = {
+            x: end.x - endDir.x * clearance,
+            y: end.y - endDir.y * clearance
+        };
+
+        // Now route between exitPoint and entryPoint
+        // We need to maintain the direction we're traveling
+        const midPath = routeBetweenPoints(exitPoint, entryPoint, startDir, endDir, obstacles);
+        path.push(...midPath);
+
+        // Final entry into the end point
+        path.push({ x: end.x, y: end.y });
+
+        // Check if this path is clear of obstacles
+        if (isPathClear(path, obstacles)) {
+            return path;
+        }
+    }
+
+    // If no clear path found, return the last attempt (with longest clearance)
+    // This shouldn't happen often but provides fallback
     const path: Point[] = [];
+    const clearance = clearanceAttempts[clearanceAttempts.length - 1];
 
-    // Start point
     path.push({ x: start.x, y: start.y });
-
-    // Exit point: go straight out from start in startDir
     const exitPoint = {
-        x: start.x + startDir.x * minStraight,
-        y: start.y + startDir.y * minStraight
+        x: start.x + startDir.x * clearance,
+        y: start.y + startDir.y * clearance
     };
     path.push(exitPoint);
 
-    // Entry point: go straight into end from endDir
-    // Note: endDir points INTO the connection, so we go opposite direction
     const entryPoint = {
-        x: end.x - endDir.x * minStraight,
-        y: end.y - endDir.y * minStraight
+        x: end.x - endDir.x * clearance,
+        y: end.y - endDir.y * clearance
     };
 
-    // Now route between exitPoint and entryPoint
-    // We need to maintain the direction we're traveling
-    const midPath = routeBetweenPoints(exitPoint, entryPoint, startDir, endDir);
+    const midPath = routeBetweenPoints(exitPoint, entryPoint, startDir, endDir, obstacles);
     path.push(...midPath);
-
-    // Final entry into the end point
     path.push({ x: end.x, y: end.y });
 
     return path;
@@ -64,12 +183,14 @@ export function generate90DegPath(
  * Route between two points, starting in startDir and ending ready to go in endDir.
  * Creates intermediate waypoints as needed.
  * Handles U-turns by routing perpendicular first to avoid doubling back.
+ * Tries multiple routing strategies to find one that avoids obstacles.
  */
 function routeBetweenPoints(
     from: Point,
     to: Point,
     fromDir: Direction,
-    toDir: Direction
+    toDir: Direction,
+    obstacles: Obstacle[] = []
 ): Point[] {
     const path: Point[] = [];
 
@@ -92,80 +213,112 @@ function routeBetweenPoints(
         (fromDir.y > 0 && dy < 0) || (fromDir.y < 0 && dy > 0);
 
     if (isUTurn || needsReversal) {
-        // U-turn or reversal detected - route perpendicular first to avoid doubling back
-        const clearanceDistance = 80; // Increased clearance to avoid factory overlap
+        // U-turn or reversal detected - try both perpendicular directions
+        const clearanceDistances = [80, 120, 160, 200];
+        const candidates: Point[][] = [];
 
         if (isFromHorizontal) {
-            // Horizontal movement: go perpendicular (up or down) first
-            // Choose direction that moves TOWARD the target to avoid reversals
-            let perpendicularDir: number;
-            if (Math.abs(dy) > 5) {
-                // Target is significantly above or below - go toward it
-                perpendicularDir = dy > 0 ? 1 : -1;
-            } else {
-                // Horizontally aligned - choose based on which way we're going
-                // If going right, go down. If going left, go up.
-                perpendicularDir = fromDir.x > 0 ? 1 : -1;
-            }
-
-            // Calculate midpoint - ensure we go far enough in perpendicular direction
-            // to have room for the horizontal travel
-            const minClearance = Math.max(clearanceDistance, Math.abs(dx) * 0.5);
-            const midY = from.y + (minClearance * perpendicularDir);
-
-            path.push({ x: from.x, y: midY });  // Turn perpendicular (90°)
-            path.push({ x: to.x, y: midY });     // Travel across horizontally
-
-            // Only add final turn if we're not already at the target Y
-            // This prevents a potential reversal
-            if (Math.abs(midY - to.y) > 5) {
-                path.push({ x: to.x, y: to.y });     // Turn to entry point (90°)
+            // Try going up and down
+            for (const clearance of clearanceDistances) {
+                for (const dir of [1, -1]) {
+                    const midY = from.y + (clearance * dir);
+                    const candidate: Point[] = [];
+                    candidate.push({ x: from.x, y: midY });
+                    candidate.push({ x: to.x, y: midY });
+                    if (Math.abs(midY - to.y) > 5) {
+                        candidate.push({ x: to.x, y: to.y });
+                    }
+                    candidates.push(candidate);
+                }
             }
         } else {
-            // Vertical movement: go perpendicular (left or right) first
-            let perpendicularDir: number;
-            if (Math.abs(dx) > 5) {
-                // Target is significantly left or right - go toward it
-                perpendicularDir = dx > 0 ? 1 : -1;
-            } else {
-                // Vertically aligned - choose based on which way we're going
-                // If going down, go right. If going up, go left.
-                perpendicularDir = fromDir.y > 0 ? 1 : -1;
-            }
-
-            // Calculate midpoint with sufficient clearance
-            const minClearance = Math.max(clearanceDistance, Math.abs(dy) * 0.5);
-            const midX = from.x + (minClearance * perpendicularDir);
-
-            path.push({ x: midX, y: from.y });   // Turn perpendicular (90°)
-            path.push({ x: midX, y: to.y });     // Travel across vertically
-
-            // Only add final turn if needed
-            if (Math.abs(midX - to.x) > 5) {
-                path.push({ x: to.x, y: to.y });     // Turn to entry point (90°)
+            // Try going left and right
+            for (const clearance of clearanceDistances) {
+                for (const dir of [1, -1]) {
+                    const midX = from.x + (clearance * dir);
+                    const candidate: Point[] = [];
+                    candidate.push({ x: midX, y: from.y });
+                    candidate.push({ x: midX, y: to.y });
+                    if (Math.abs(midX - to.x) > 5) {
+                        candidate.push({ x: to.x, y: to.y });
+                    }
+                    candidates.push(candidate);
+                }
             }
         }
+
+        // Find first clear path
+        for (const candidate of candidates) {
+            const testPath = [from, ...candidate];
+            if (isPathClear(testPath, obstacles)) {
+                return candidate;
+            }
+        }
+
+        // If no clear path, return the first attempt
+        path.push(...candidates[0]);
     } else if (isFromHorizontal === isToHorizontal) {
-        // Same orientation (but not U-turn) - need 3 segments
+        // Same orientation (but not U-turn) - try different midpoint positions
+        const candidates: Point[][] = [];
+
         if (isFromHorizontal) {
             // Both horizontal: go horizontal, vertical, horizontal
-            const midX = from.x + dx / 2;
-            path.push({ x: midX, y: from.y });
-            path.push({ x: midX, y: to.y });
+            // Try different horizontal splits
+            const splits = [dx / 2, dx * 0.3, dx * 0.7, dx * 0.4, dx * 0.6];
+            for (const split of splits) {
+                const midX = from.x + split;
+                const candidate: Point[] = [];
+                candidate.push({ x: midX, y: from.y });
+                candidate.push({ x: midX, y: to.y });
+                candidates.push(candidate);
+            }
         } else {
             // Both vertical: go vertical, horizontal, vertical
-            const midY = from.y + dy / 2;
-            path.push({ x: from.x, y: midY });
-            path.push({ x: to.x, y: midY });
+            // Try different vertical splits
+            const splits = [dy / 2, dy * 0.3, dy * 0.7, dy * 0.4, dy * 0.6];
+            for (const split of splits) {
+                const midY = from.y + split;
+                const candidate: Point[] = [];
+                candidate.push({ x: from.x, y: midY });
+                candidate.push({ x: to.x, y: midY });
+                candidates.push(candidate);
+            }
         }
+
+        // Find first clear path
+        for (const candidate of candidates) {
+            const testPath = [from, ...candidate];
+            if (isPathClear(testPath, obstacles)) {
+                return candidate;
+            }
+        }
+
+        // If no clear path, return the first attempt
+        path.push(...candidates[0]);
     } else {
         // Different orientation - need 1 turn
+        // Try both corner options
+        const option1: Point[] = [{ x: to.x, y: from.y }];
+        const option2: Point[] = [{ x: from.x, y: to.y }];
+
         if (isFromHorizontal) {
-            // From horizontal to vertical: turn at corner
-            path.push({ x: to.x, y: from.y });
+            // Prefer going horizontal first (matches fromDir)
+            if (isPathClear([from, ...option1], obstacles)) {
+                path.push(...option1);
+            } else if (isPathClear([from, ...option2], obstacles)) {
+                path.push(...option2);
+            } else {
+                path.push(...option1); // Default
+            }
         } else {
-            // From vertical to horizontal: turn at corner
-            path.push({ x: from.x, y: to.y });
+            // Prefer going vertical first (matches fromDir)
+            if (isPathClear([from, ...option2], obstacles)) {
+                path.push(...option2);
+            } else if (isPathClear([from, ...option1], obstacles)) {
+                path.push(...option1);
+            } else {
+                path.push(...option2); // Default
+            }
         }
     }
 
@@ -174,21 +327,22 @@ function routeBetweenPoints(
 
 /**
  * Automatically choose best routing strategy based on positions and directions.
- * Enforces 90° entry/exit angles.
+ * Enforces 90° entry/exit angles and avoids obstacles.
  */
 export function generateSmartPath(
     start: Point,
     end: Point,
     startDirection?: Direction,
-    endDirection?: Direction
+    endDirection?: Direction,
+    obstacles: Obstacle[] = []
 ): Point[] {
     // Check if we have valid direction info (non-zero vectors)
     const hasValidStartDir = startDirection && (startDirection.x !== 0 || startDirection.y !== 0);
     const hasValidEndDir = endDirection && (endDirection.x !== 0 || endDirection.y !== 0);
 
-    // If we have valid direction info, use the 90° routing
+    // If we have valid direction info, use the 90° routing with obstacle avoidance
     if (hasValidStartDir && hasValidEndDir) {
-        return generate90DegPath(start, end, startDirection, endDirection);
+        return generate90DegPath(start, end, startDirection, endDirection, 40, obstacles);
     }
 
     // Fallback to simple routing if no direction info
